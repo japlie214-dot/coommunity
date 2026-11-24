@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48">
+  <rect width="48" height="48" rx="10" fill="#0f172a"/>
+  <!-- Central Hub Connections -->
+  <line x1="24" y1="14" x2="14" y2="34" stroke="#64748b" stroke-width="2" stroke-dasharray="2,2"/>
+  <line x1="24" y1="14" x2="34" y2="34" stroke="#64748b" stroke-width="2" stroke-dasharray="2,2"/>
+  <line x1="14" y1="34" x2="34" y2="34" stroke="#64748b" stroke-width="2" stroke-dasharray="2,2"/>
+  <!-- Central Hub Node -->
+  <circle cx="24" cy="24" r="5" fill="#6366f1"/>
+  <!-- Node 1: Antigravity (Top) -->
+  <circle cx="24" cy="14" r="4.5" fill="#38bdf8"/>
+  <!-- Node 2: Claude Code (Bottom Left) -->
+  <circle cx="14" cy="34" r="4.5" fill="#f59e0b"/>
+  <!-- Node 3: Codex (Bottom Right) -->
+  <circle cx="34" cy="34" r="4.5" fill="#10b981"/>
+</svg>

@@ -1,0 +1,16 @@
+{
+  "$schema": "https://www.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "coom",
+  "version": "1.3.0",
+  "description": "Unified multi-agent communication hub (DM, Forums, Inbox, Status) connecting Claude Code, Codex, and Antigravity.",
+  "author": {
+    "name": "coommunity",
+    "url": "https://github.com/coommunity"
+  },
+  "mcpServers": {
+    "coom": {
+      "command": "coom",
+      "args": ["mcp", "--runtime", "claude_code"]
+    }
+  }
+}

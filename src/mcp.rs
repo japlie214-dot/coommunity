@@ -1,0 +1,806 @@
+use anyhow::{anyhow, Result};
+use reqwest::Client;
+use serde_json::{json, Value};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+use crate::config::Config;
+use crate::models::{
+    AckInboxRequest, CreateThreadRequest, PostMessageRequest, RegisterAgentRequest, SendDmRequest,
+    SubscribeRequest,
+};
+
+pub async fn run_mcp_stdio(
+    cfg: Config,
+    runtime: String,
+    address_override: Option<String>,
+) -> Result<()> {
+    let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
+    ensure_daemon_running(&cfg, &client).await?;
+
+    let cwd = std::env::current_dir()
+        .ok()
+        .map(|p| p.to_string_lossy().to_string());
+    let endpoint = std::env::var("CLAUDE_CODE_MESSAGING_SOCKET")
+        .ok()
+        .or_else(|| std::env::var("COOMMUNITY_CODEX_WS").ok());
+    let auth_token = std::env::var("CLAUDE_CODE_MESSAGING_TOKEN").ok();
+    let session_id = std::env::var("COOMMUNITY_SESSION_ID")
+        .ok()
+        .or_else(|| std::env::var("CLAUDE_SESSION_ID").ok())
+        .or_else(|| std::env::var("CODEX_SESSION_ID").ok())
+        .or_else(|| std::env::var("AGY_CONVERSATION_ID").ok())
+        .or_else(|| std::env::var("CONVERSATION_ID").ok());
+    let session_key = session_id.clone().or_else(|| endpoint.clone());
+
+    // Register this MCP session automatically
+    let reg = RegisterAgentRequest {
+        address: address_override.or_else(|| std::env::var("COOMMUNITY_AGENT").ok()),
+        runtime: runtime.clone(),
+        session_id,
+        cwd,
+        status: Some("online".to_string()),
+        transport: None,
+        endpoint,
+        auth_token,
+        allow_wake_resume: Some(
+            std::env::var("COOM_WAKE_RESUME")
+                .or_else(|_| std::env::var("COOMMUNITY_WAKE_RESUME"))
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or_else(|_| runtime == "antigravity" || runtime == "codex"),
+        ),
+    };
+
+    let me: Value = client
+        .post(format!("{}/api/agents", cfg.base_url()))
+        .json(&reg)
+        .send()
+        .await?
+        .json()
+        .await?;
+    let my_address = me
+        .get("address")
+        .and_then(|v| v.as_str())
+        .unwrap_or("agent:unknown")
+        .to_string();
+
+    let (tx_out, mut rx_out) = tokio::sync::mpsc::channel::<String>(128);
+    let mut stdout = tokio::io::stdout();
+    let stdout_handle = tokio::spawn(async move {
+        while let Some(msg) = rx_out.recv().await {
+            let _ = stdout.write_all(msg.as_bytes()).await;
+            let _ = stdout.flush().await;
+        }
+    });
+
+    // Option 4: Background SSE event subscriber streaming out-of-band MCP notifications
+    let sse_client = client.clone();
+    let sse_url = format!("{}/api/events", cfg.base_url());
+    let sse_my_address = my_address.clone();
+    let sse_tx = tx_out.clone();
+
+    let sse_handle = tokio::spawn(async move {
+        if let Ok(mut resp) = sse_client
+            .get(&sse_url)
+            .timeout(Duration::from_secs(86400))
+            .send()
+            .await
+        {
+            let mut buffer = String::new();
+            while let Ok(Some(chunk)) = resp.chunk().await {
+                if let Ok(text) = std::str::from_utf8(&chunk) {
+                    buffer.push_str(text);
+                    while let Some(pos) = buffer.find('\n') {
+                        let line = buffer[..pos].trim().to_string();
+                        buffer = buffer[pos + 1..].to_string();
+                        if let Some(json_str) = line.strip_prefix("data:") {
+                            let json_str = json_str.trim();
+                            if let Ok(event) = serde_json::from_str::<Value>(json_str) {
+                                if event.get("type").and_then(|v| v.as_str())
+                                    == Some("message_posted")
+                                {
+                                    if let Some(msg) = event.get("message") {
+                                        let sender = msg
+                                            .get("sender")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("");
+                                        if sender != sse_my_address {
+                                            let body = msg
+                                                .get("body")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("");
+                                            let mentions =
+                                                msg.get("mentions").and_then(|v| v.as_array());
+                                            let is_mention = mentions.map_or(false, |arr| {
+                                                arr.iter().any(|m| {
+                                                    m.as_str().map_or(false, |s| {
+                                                        s.eq_ignore_ascii_case(&sse_my_address)
+                                                            || s.eq_ignore_ascii_case("all")
+                                                            || s.eq_ignore_ascii_case("everyone")
+                                                    })
+                                                })
+                                            });
+                                            let thread_kind = event
+                                                .get("thread")
+                                                .and_then(|t| t.get("kind"))
+                                                .and_then(|k| k.as_str())
+                                                .unwrap_or("");
+                                            let is_dm = thread_kind == "dm";
+
+                                            if is_dm || is_mention {
+                                                // 1. Emit out-of-band MCP logging notification
+                                                let notify = json!({
+                                                    "jsonrpc": "2.0",
+                                                    "method": "notifications/message",
+                                                    "params": {
+                                                        "level": "info",
+                                                        "logger": "coom",
+                                                        "data": format!("[coom notification] From {sender}: {body}")
+                                                    }
+                                                });
+                                                if let Ok(out) = serde_json::to_string(&notify) {
+                                                    let _ = sse_tx.send(format!("{out}\n")).await;
+                                                }
+                                                // 2. Invalidate/update resource for inbox
+                                                let res_update = json!({
+                                                    "jsonrpc": "2.0",
+                                                    "method": "notifications/resources/updated",
+                                                    "params": {
+                                                        "uri": "coom://inbox"
+                                                    }
+                                                });
+                                                if let Ok(out) = serde_json::to_string(&res_update) {
+                                                    let _ = sse_tx.send(format!("{out}\n")).await;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let stdin = tokio::io::stdin();
+    let mut lines = BufReader::new(stdin).lines();
+
+    while let Some(line) = lines.next_line().await? {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let req: Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let id = req.get("id").cloned();
+        let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
+        let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
+
+        let resp = match method {
+            "initialize" => Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {},
+                        "logging": {},
+                        "resources": { "subscribe": true, "listChanged": true }
+                    },
+                    "serverInfo": {
+                        "name": "coom",
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "instructions": format!(
+                        "You are connected to the local coom multi-agent hub as `{my_address}`. \
+                         Use `list_agents` to discover peers, `dm` for 1-to-1 messages, and \
+                         `create_thread`/`subscribe`/`post`/`read_thread` for multi-agent forums. \
+                         Default forum subscription mode is `mentions` to prevent runaway reply loops."
+                    )
+                }
+            })),
+            "notifications/initialized" => None,
+            "ping" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
+            "resources/list" => Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "resources": resource_definitions() }
+            })),
+            "resources/read" => {
+                let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
+                match handle_resource_read(&cfg, &client, &my_address, uri).await {
+                    Ok(val) => Some(json!({ "jsonrpc": "2.0", "id": id, "result": val })),
+                    Err(e) => Some(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": { "code": -32002, "message": format!("Resource read failed: {e}") }
+                    })),
+                }
+            }
+            "resources/subscribe" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
+            "resources/unsubscribe" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
+            "tools/list" => Some(json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": { "tools": tool_definitions() }
+            })),
+            "tools/call" => {
+                let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                let call_result =
+                    handle_tool_call(&cfg, &client, &my_address, name, &args).await;
+                let payload = match call_result {
+                    Ok(v) => json!({
+                        "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }],
+                        "isError": false
+                    }),
+                    Err(e) => json!({
+                        "content": [{ "type": "text", "text": format!("Error: {e}") }],
+                        "isError": true
+                    }),
+                };
+                Some(json!({ "jsonrpc": "2.0", "id": id, "result": payload }))
+            }
+            _ => id.map(|req_id| {
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": req_id,
+                    "error": { "code": -32601, "message": format!("Method not found: {method}") }
+                })
+            }),
+        };
+
+        if let Some(r) = resp {
+            let mut out = serde_json::to_string(&r)?;
+            out.push('\n');
+            let _ = tx_out.send(out).await;
+        }
+    }
+
+    // Clean shutdown: abort background SSE listener and wait for pending stdout flushes
+    sse_handle.abort();
+    drop(tx_out);
+    let _ = stdout_handle.await;
+
+    // Best-effort session offline update when MCP stdio closes
+    let _ = client
+        .post(format!("{}/api/agents/{}/status", cfg.base_url(), my_address))
+        .json(&json!({ "status": "offline", "session_id": session_key }))
+        .send()
+        .await;
+
+    Ok(())
+}
+
+pub async fn ensure_daemon_running(cfg: &Config, client: &Client) -> Result<()> {
+    let health_url = format!("{}/api/health", cfg.base_url());
+    if client.get(&health_url).send().await.is_ok() {
+        return Ok(());
+    }
+
+    // Spawn `coommunity daemon` detached in background
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("daemon")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x00000008;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
+    }
+
+    let _ = cmd.spawn()?;
+
+    for _ in 0..25 {
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        if client.get(&health_url).send().await.is_ok() {
+            return Ok(());
+        }
+    }
+    Err(anyhow!(
+        "coommunity daemon failed to start at {}",
+        cfg.base_url()
+    ))
+}
+
+async fn handle_tool_call(
+    cfg: &Config,
+    client: &Client,
+    my_address: &str,
+    name: &str,
+    args: &Value,
+) -> Result<Value> {
+    let base = cfg.base_url();
+    match name {
+        "whoami" => Ok(json!({
+            "address": my_address,
+            "hub_url": base,
+            "viewer_url": base
+        })),
+        "list_agents" => {
+            let v: Value = client.get(format!("{base}/api/agents")).send().await?.json().await?;
+            Ok(v)
+        }
+        "set_status" => {
+            let status = req_str(args, "status")?;
+            let v: Value = client
+                .post(format!("{base}/api/agents/{my_address}/status"))
+                .json(&json!({ "status": status }))
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "dm" => {
+            let req = SendDmRequest {
+                from: my_address.to_string(),
+                to: req_str(args, "to")?,
+                body: req_str(args, "body")?,
+                ack_only: args
+                    .get("ack_only")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            };
+            let v: Value = client
+                .post(format!("{base}/api/dm"))
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "create_thread" => {
+            let members: Vec<String> = args
+                .get("members")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let req = CreateThreadRequest {
+                title: req_str(args, "title")?,
+                description: args
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                created_by: my_address.to_string(),
+                members,
+                default_mode: args
+                    .get("default_mode")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                max_hops: args.get("max_hops").and_then(|v| v.as_i64()),
+            };
+            let v: Value = client
+                .post(format!("{base}/api/threads"))
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "list_threads" => {
+            let v: Value = client
+                .get(format!("{base}/api/threads"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "post" => {
+            let thread_id = req_str(args, "thread_id")?;
+            let mentions: Vec<String> = args
+                .get("mentions")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let req = PostMessageRequest {
+                sender: my_address.to_string(),
+                body: req_str(args, "body")?,
+                mentions,
+                ack_only: args
+                    .get("ack_only")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+            };
+            let v: Value = client
+                .post(format!("{base}/api/threads/{thread_id}/messages"))
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "read_thread" => {
+            let thread_id = req_str(args, "thread_id")?;
+            let since_seq = args.get("since_seq").and_then(|v| v.as_i64()).unwrap_or(0);
+            let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
+            let v: Value = client
+                .get(format!(
+                    "{base}/api/threads/{thread_id}/messages?since_seq={since_seq}&limit={limit}"
+                ))
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "subscribe" => {
+            let thread_id = req_str(args, "thread_id")?;
+            let mode = args
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("mentions")
+                .to_string();
+            let req = SubscribeRequest {
+                agent_address: my_address.to_string(),
+                mode,
+            };
+            let v: Value = client
+                .post(format!("{base}/api/threads/{thread_id}/subscriptions"))
+                .json(&req)
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "unsubscribe" => {
+            let thread_id = req_str(args, "thread_id")?;
+            let resp = client
+                .delete(format!(
+                    "{base}/api/threads/{thread_id}/subscriptions/{my_address}"
+                ))
+                .send()
+                .await?;
+            Ok(json!({ "unsubscribed": resp.status().is_success(), "thread_id": thread_id }))
+        }
+        "check_inbox" => {
+            let v: Value = client
+                .get(format!("{base}/api/agents/{my_address}/inbox"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "ack_inbox" => {
+            let req = AckInboxRequest {
+                agent_address: my_address.to_string(),
+                thread_id: req_str(args, "thread_id")?,
+                up_to_seq: args
+                    .get("up_to_seq")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| anyhow!("missing required integer parameter `up_to_seq`"))?,
+            };
+            let resp = client
+                .post(format!("{base}/api/inbox/ack"))
+                .json(&req)
+                .send()
+                .await?;
+            Ok(json!({ "acked": resp.status().is_success() }))
+        }
+        "wait_for_message" => {
+            let timeout_secs = args
+                .get("timeout_secs")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(30)
+                .min(300);
+
+            // 1. Check if unread messages are already in inbox
+            let inbox_items: Vec<Value> = client
+                .get(format!("{base}/api/agents/{my_address}/inbox"))
+                .send()
+                .await?
+                .json()
+                .await
+                .unwrap_or_default();
+
+            if !inbox_items.is_empty() {
+                return Ok(json!({
+                    "status": "received",
+                    "source": "inbox",
+                    "messages": inbox_items
+                }));
+            }
+
+            // 2. Stream SSE events until a matching message arrives or timeout
+            let sse_url = format!("{base}/api/events");
+            let timeout_dur = Duration::from_secs(timeout_secs);
+            let sse_call = async {
+                if let Ok(mut resp) = client.get(&sse_url).timeout(timeout_dur).send().await {
+                    let mut buffer = String::new();
+                    while let Ok(Some(chunk)) = resp.chunk().await {
+                        if let Ok(text) = std::str::from_utf8(&chunk) {
+                            buffer.push_str(text);
+                            while let Some(pos) = buffer.find('\n') {
+                                let line = buffer[..pos].trim().to_string();
+                                buffer = buffer[pos + 1..].to_string();
+                                if let Some(json_str) = line.strip_prefix("data:") {
+                                    if let Ok(ev) = serde_json::from_str::<Value>(json_str.trim()) {
+                                        if ev.get("type").and_then(|v| v.as_str()) == Some("message_posted") {
+                                            if let Some(msg) = ev.get("message") {
+                                                let sender = msg.get("sender").and_then(|v| v.as_str()).unwrap_or("");
+                                                if sender != my_address {
+                                                    let mentions = msg.get("mentions").and_then(|v| v.as_array());
+                                                    let is_mention = mentions.map_or(false, |arr| {
+                                                        arr.iter().any(|m| {
+                                                            m.as_str().map_or(false, |s| {
+                                                                s.eq_ignore_ascii_case(my_address)
+                                                                    || s.eq_ignore_ascii_case("all")
+                                                                    || s.eq_ignore_ascii_case("everyone")
+                                                            })
+                                                        })
+                                                    });
+                                                    let thread_kind = ev.get("thread").and_then(|t| t.get("kind")).and_then(|k| k.as_str()).unwrap_or("");
+                                                    if thread_kind == "dm" || is_mention {
+                                                        return Ok::<Value, anyhow::Error>(json!({
+                                                            "status": "received",
+                                                            "source": "live_stream",
+                                                            "message": msg,
+                                                            "thread": ev.get("thread")
+                                                        }));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(json!({
+                    "status": "timeout",
+                    "message": format!("No incoming messages received within {timeout_secs}s.")
+                }))
+            };
+
+            match tokio::time::timeout(timeout_dur, sse_call).await {
+                Ok(res) => res,
+                Err(_) => Ok(json!({
+                    "status": "timeout",
+                    "message": format!("Timed out waiting for message after {timeout_secs}s.")
+                })),
+            }
+        }
+        _ => Err(anyhow!("unknown tool: {name}")),
+    }
+}
+
+fn req_str(args: &Value, key: &str) -> Result<String> {
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("missing required string parameter `{key}`"))
+}
+
+pub fn tool_definitions() -> Value {
+    json!([
+        {
+            "name": "whoami",
+            "description": "Return this agent's registered coommunity address and local viewer URL.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "list_agents",
+            "description": "List all registered agents (Claude Code, Claude Desktop, Codex, Antigravity), their addresses, working directories, statuses, and delivery transports.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "set_status",
+            "description": "Update this agent's presence status (online, busy, idle, offline).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "status": { "type": "string", "enum": ["online", "busy", "idle", "offline"] }
+                },
+                "required": ["status"]
+            }
+        },
+        {
+            "name": "dm",
+            "description": "Send a direct message to another agent's address (e.g. `cc:backend`, `codex:tests`, `agy:research`).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "to": { "type": "string", "description": "Target agent address from list_agents" },
+                    "body": { "type": "string", "description": "Message text" },
+                    "ack_only": { "type": "boolean", "description": "If true, tells the recipient no reply is needed" }
+                },
+                "required": ["to", "body"]
+            }
+        },
+        {
+            "name": "create_thread",
+            "description": "Create a multi-agent forum thread and subscribe initial members.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Short forum topic title" },
+                    "description": { "type": "string", "description": "Optional context or goal for the thread" },
+                    "members": { "type": "array", "items": { "type": "string" }, "description": "Agent addresses to subscribe" },
+                    "default_mode": { "type": "string", "enum": ["mentions", "digest", "all", "muted"], "description": "Initial subscription mode (default: mentions)" },
+                    "max_hops": { "type": "integer", "description": "Max automatic agent replies before pausing push (default: 8)" }
+                },
+                "required": ["title"]
+            }
+        },
+        {
+            "name": "list_threads",
+            "description": "List all DM and forum threads on the hub.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "post",
+            "description": "Post a message to a forum or DM thread. Include @agent:name in body or mentions array to wake mention-subscribed agents.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "thread_id": { "type": "string" },
+                    "body": { "type": "string" },
+                    "mentions": { "type": "array", "items": { "type": "string" } },
+                    "ack_only": { "type": "boolean", "description": "Mark as informational so recipients don't feel forced to reply" }
+                },
+                "required": ["thread_id", "body"]
+            }
+        },
+        {
+            "name": "read_thread",
+            "description": "Read messages in a thread after an optional sequence number.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "thread_id": { "type": "string" },
+                    "since_seq": { "type": "integer", "default": 0 },
+                    "limit": { "type": "integer", "default": 50 }
+                },
+                "required": ["thread_id"]
+            }
+        },
+        {
+            "name": "subscribe",
+            "description": "Subscribe this agent to a forum thread with a notification mode (mentions, digest, all, muted).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "thread_id": { "type": "string" },
+                    "mode": { "type": "string", "enum": ["mentions", "digest", "all", "muted"], "default": "mentions" }
+                },
+                "required": ["thread_id"]
+            }
+        },
+        {
+            "name": "unsubscribe",
+            "description": "Unsubscribe this agent from a forum thread.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "thread_id": { "type": "string" } },
+                "required": ["thread_id"]
+            }
+        },
+        {
+            "name": "check_inbox",
+            "description": "Check unread DMs and subscribed forum updates for this agent.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "ack_inbox",
+            "description": "Mark a thread read up to a given message sequence number.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "thread_id": { "type": "string" },
+                    "up_to_seq": { "type": "integer" }
+                },
+                "required": ["thread_id", "up_to_seq"]
+            }
+        },
+        {
+            "name": "wait_for_message",
+            "description": "Block and wait for an incoming direct message or forum mention without busy-polling. Returns immediately when a message is received or when timeout expires.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "timeout_secs": {
+                        "type": "integer",
+                        "description": "Maximum seconds to wait for a message (default: 30, max: 300)",
+                        "default": 30
+                    }
+                }
+            }
+        }
+    ])
+}
+
+pub fn resource_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "uri": "coom://inbox",
+            "name": "Unread Inbox Messages",
+            "description": "Unread direct messages and subscribed forum updates for this agent",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uri": "coom://status",
+            "name": "Hub Status & Registered Agents",
+            "description": "Real-time hub health, global pause state, and registered agents across runtimes",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uri": "coom://threads",
+            "name": "Active Forum & DM Threads",
+            "description": "All active discussion threads and their subscription states",
+            "mimeType": "application/json"
+        }),
+    ]
+}
+
+async fn handle_resource_read(
+    cfg: &Config,
+    client: &Client,
+    my_address: &str,
+    uri: &str,
+) -> Result<Value> {
+    let base = cfg.base_url();
+    let text_content = match uri {
+        "coom://inbox" => {
+            let v: Value = client
+                .get(format!("{base}/api/agents/{my_address}/inbox"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            serde_json::to_string_pretty(&v)?
+        }
+        "coom://status" => {
+            let snap: Value = client
+                .get(format!("{base}/api/snapshot"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            serde_json::to_string_pretty(&snap)?
+        }
+        "coom://threads" => {
+            let threads: Value = client
+                .get(format!("{base}/api/threads"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            serde_json::to_string_pretty(&threads)?
+        }
+        other => return Err(anyhow!("Unsupported resource URI: {other}")),
+    };
+
+    Ok(json!({
+        "contents": [
+            {
+                "uri": uri,
+                "mimeType": "application/json",
+                "text": text_content
+            }
+        ]
+    }))
+}
