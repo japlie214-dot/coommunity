@@ -1,72 +1,40 @@
 use anyhow::{Context, Result};
-use reqwest::Client;
-use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::time::Duration;
+use uuid::Uuid;
 
 use crate::config::{resolve_cli_program, Config};
 use crate::mcp::ensure_daemon_running;
 use crate::models::RegisterAgentRequest;
 
-/// Hybrid thin launcher for Codex CLI:
-/// 1. Ensures `coommunity daemon` is running.
-/// 2. Ensures a local `codex app-server --listen ws://127.0.0.1:<port>` is running.
-/// 3. Registers this Codex session with `codex_app_server` transport so coommunityd can push
-///    live JSON-RPC `turn/start` messages directly into the open TUI.
-/// 4. Launches the 100% native Codex TUI via `codex --remote ws://127.0.0.1:<port>`.
+/// Thin launcher for Codex CLI that ensures the `coom` daemon is running, registers a
+/// unique session ID for hook unread reminders, and launches native `codex`.
 pub async fn run_codex_launcher(
     cfg: Config,
     agent_name: Option<String>,
     extra_args: Vec<String>,
 ) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = cfg.http_client(Duration::from_secs(5))?;
     ensure_daemon_running(&cfg, &client).await?;
 
-    let ws_url = cfg.codex_ws_url();
-    let addr = format!("127.0.0.1:{}", cfg.codex_app_server_port);
     let (codex_prog, codex_prefix) = resolve_cli_program("codex");
-
-    if TcpStream::connect(&addr).is_err() {
-        let mut srv = Command::new(&codex_prog);
-        srv.args(&codex_prefix)
-            .args(["app-server", "--listen", &ws_url])
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const DETACHED_PROCESS: u32 = 0x00000008;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            srv.creation_flags(DETACHED_PROCESS | CREATE_NO_WINDOW);
-        }
-
-        srv.spawn()
-            .context("failed to launch `codex app-server`; ensure `codex` is on PATH")?;
-
-        for _ in 0..30 {
-            tokio::time::sleep(Duration::from_millis(150)).await;
-            if TcpStream::connect(&addr).is_ok() {
-                break;
-            }
-        }
-    }
-
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().to_string());
+    let session_id = std::env::var("CODEX_SESSION_ID")
+        .ok()
+        .unwrap_or_else(|| format!("codex-{}", &Uuid::new_v4().to_string()[..8]));
 
     let reg = RegisterAgentRequest {
         address: agent_name.clone(),
         runtime: "codex".to_string(),
-        session_id: std::env::var("CODEX_SESSION_ID").ok(),
+        session_id: Some(session_id.clone()),
         cwd,
         status: Some("online".to_string()),
-        transport: Some("codex_app_server".to_string()),
-        endpoint: Some(ws_url.clone()),
+        transport: Some("poll_only".to_string()),
+        endpoint: None,
         auth_token: None,
-        allow_wake_resume: Some(false),
+        allow_wake_resume: None,
     };
 
     let registered = client
@@ -86,31 +54,33 @@ pub async fn run_codex_launcher(
         .to_string();
 
     eprintln!(
-        "[coommunity] Launching native Codex TUI attached to {ws_url} as `{resolved_addr}` (viewer: {})",
+        "[coommunity] Launching native Codex TUI as `{resolved_addr}` (hook unread reminders active; viewer: {})",
         cfg.base_url()
     );
 
     let mut tui = Command::new(&codex_prog);
     tui.args(&codex_prefix)
-        .arg("--remote")
-        .arg(&ws_url)
         .args(&extra_args)
+        .env("COOM_AGENT", &resolved_addr)
         .env("COOMMUNITY_AGENT", &resolved_addr)
-        .env("COOMMUNITY_CODEX_WS", &ws_url)
+        .env("CODEX_SESSION_ID", &session_id)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
     let status = tui
         .status()
-        .context("failed to launch `codex --remote`; ensure Codex CLI is installed")?;
+        .context("failed to launch `codex`; ensure Codex CLI is installed")?;
 
     let _ = client
         .post(format!(
             "{}/api/agents/{resolved_addr}/status",
             cfg.base_url()
         ))
-        .json(&serde_json::json!({ "status": "offline" }))
+        .json(&serde_json::json!({
+            "status": "offline",
+            "session_id": session_id
+        }))
         .send()
         .await;
 

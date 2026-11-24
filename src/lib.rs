@@ -10,7 +10,6 @@ pub mod web_ui;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use reqwest::Client;
 use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
@@ -42,7 +41,7 @@ pub enum Commands {
         address: Option<String>,
     },
 
-    /// Hybrid launcher: starts local `codex app-server` and attaches native Codex TUI via `codex --remote`
+    /// Legacy Codex launcher (kept for compatibility; hook reminders work with plain `codex`)
     Codex {
         /// Optional explicit agent address (e.g. codex:tests)
         #[arg(long)]
@@ -96,7 +95,7 @@ pub enum Commands {
         thread_id: String,
         /// Message text
         body: String,
-        /// Explicit agent addresses to mention/wake
+        /// Explicit agent addresses to mention
         #[arg(long, value_delimiter = ',')]
         mentions: Vec<String>,
         /// Optional sender address (defaults to COOM_AGENT or cli:user)
@@ -118,6 +117,9 @@ pub enum Commands {
         /// Acknowledge messages up to this sequence number
         #[arg(long)]
         ack_up_to: Option<i64>,
+        /// Mark all subscribed threads read for this agent
+        #[arg(long)]
+        ack_all: bool,
     },
 
     /// List all active forum and DM threads
@@ -126,16 +128,16 @@ pub enum Commands {
     /// List all registered agents and their current status
     Agents,
 
-    /// Pause all push notifications globally (emergency anti-loop kill-switch)
+    /// Pause all hub notifications globally (emergency anti-loop kill-switch)
     Pause,
 
-    /// Resume push notifications globally
+    /// Resume hub notifications globally
     Resume,
 
-    /// Mute push notifications for a specific thread
+    /// Mute notifications for a specific thread
     Mute { thread_id: String },
 
-    /// Unmute push notifications for a specific thread
+    /// Unmute notifications for a specific thread
     Unmute { thread_id: String },
 
     /// Reset the anti-loop hop counter for a thread
@@ -169,8 +171,8 @@ pub async fn run_cli() -> Result<()> {
         Commands::Post { thread_id, body, mentions, sender, ack_only } => {
             cli_post(&cfg, thread_id, body, mentions, ack_only, sender).await
         }
-        Commands::Inbox { agent, thread_id, ack_up_to } => {
-            cli_inbox(&cfg, agent, thread_id, ack_up_to).await
+        Commands::Inbox { agent, thread_id, ack_up_to, ack_all } => {
+            cli_inbox(&cfg, agent, thread_id, ack_up_to, ack_all).await
         }
         Commands::Threads => cli_threads(&cfg).await,
         Commands::Agents => cli_agents(&cfg).await,
@@ -206,7 +208,7 @@ pub async fn run_cli() -> Result<()> {
 }
 
 pub async fn cli_status(cfg: &Config) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(3)).build()?;
+    let client = cfg.http_client(Duration::from_secs(3))?;
     let url = format!("{}/api/snapshot", cfg.base_url());
     match client.get(&url).send().await {
         Ok(resp) if resp.status().is_success() => {
@@ -250,7 +252,7 @@ pub async fn cli_dm(
     ack_only: bool,
     from: Option<String>,
 ) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = cfg.http_client(Duration::from_secs(5))?;
     let from_addr = from
         .or_else(|| std::env::var("COOM_AGENT").ok())
         .or_else(|| std::env::var("COOMMUNITY_AGENT").ok())
@@ -268,17 +270,9 @@ pub async fn cli_dm(
         .await?;
     if resp.status().is_success() {
         let val: serde_json::Value = resp.json().await?;
-        let msg_id = val
-            .get("message")
-            .and_then(|m| m.get("id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("ok");
-        let seq = val
-            .get("message")
-            .and_then(|m| m.get("seq"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1);
-        println!("DM delivered to `{to}` (seq #{seq}, id: {msg_id})");
+        let msg_id = val.get("id").and_then(|v| v.as_str()).unwrap_or("ok");
+        let seq = val.get("seq").and_then(|v| v.as_i64()).unwrap_or(1);
+        println!("DM queued for `{to}` (seq #{seq}, id: {msg_id})");
     } else {
         eprintln!("Failed to send DM: {}", resp.status());
     }
@@ -293,7 +287,7 @@ pub async fn cli_post(
     ack_only: bool,
     sender: Option<String>,
 ) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = cfg.http_client(Duration::from_secs(5))?;
     let sender_addr = sender
         .or_else(|| std::env::var("COOM_AGENT").ok())
         .or_else(|| std::env::var("COOMMUNITY_AGENT").ok())
@@ -311,16 +305,8 @@ pub async fn cli_post(
         .await?;
     if resp.status().is_success() {
         let val: serde_json::Value = resp.json().await?;
-        let msg_id = val
-            .get("message")
-            .and_then(|m| m.get("id"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("ok");
-        let seq = val
-            .get("message")
-            .and_then(|m| m.get("seq"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(1);
+        let msg_id = val.get("id").and_then(|v| v.as_str()).unwrap_or("ok");
+        let seq = val.get("seq").and_then(|v| v.as_i64()).unwrap_or(1);
         println!("Posted message #{seq} to `{thread_id}` (id: {msg_id})");
     } else {
         eprintln!("Failed to post message: {}", resp.status());
@@ -333,12 +319,31 @@ pub async fn cli_inbox(
     agent: Option<String>,
     thread_id: Option<String>,
     ack_up_to: Option<i64>,
+    ack_all: bool,
 ) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = cfg.http_client(Duration::from_secs(5))?;
     let agent_addr = agent
         .or_else(|| std::env::var("COOM_AGENT").ok())
         .or_else(|| std::env::var("COOMMUNITY_AGENT").ok())
         .unwrap_or_else(|| "agent:unknown".to_string());
+
+    if ack_all {
+        let resp = client
+            .post(format!(
+                "{}/api/agents/{agent_addr}/inbox/ack-all",
+                cfg.base_url()
+            ))
+            .send()
+            .await?;
+        if resp.status().is_success() {
+            let val: serde_json::Value = resp.json().await.unwrap_or_default();
+            let count = val.get("acked_threads").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("Marked all unread threads read for `{agent_addr}` ({count} subscription(s)).");
+        } else {
+            eprintln!("Ack-all failed: {}", resp.status());
+        }
+        return Ok(());
+    }
 
     if let (Some(tid), Some(seq)) = (thread_id, ack_up_to) {
         let req = models::AckInboxRequest {
@@ -371,9 +376,19 @@ pub async fn cli_inbox(
             let total: i64 = items.iter().map(|i| i.unread_count).sum();
             println!("Inbox for `{agent_addr}` ({total} unread):");
             for item in items {
+                let mention_note = if item.mentioned_count > 0 {
+                    format!(", {} @mention", item.mentioned_count)
+                } else {
+                    String::new()
+                };
                 println!(
-                    "  - [{:<5}] {:<24} ({} unread, last from: {})",
-                    item.thread_kind.as_str(), item.thread_title, item.unread_count, item.latest_sender
+                    "  - [{:<5}] {:<24} ({} unread{}, latest #{} from: {})",
+                    item.thread_kind.as_str(),
+                    item.thread_title,
+                    item.unread_count,
+                    mention_note,
+                    item.latest_seq,
+                    item.latest_sender
                 );
                 println!("    Thread ID: {}", item.thread_id);
             }
@@ -385,7 +400,7 @@ pub async fn cli_inbox(
 }
 
 pub async fn cli_threads(cfg: &Config) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = cfg.http_client(Duration::from_secs(5))?;
     let resp = client
         .get(format!("{}/api/threads", cfg.base_url()))
         .send()
@@ -417,7 +432,7 @@ pub async fn cli_threads(cfg: &Config) -> Result<()> {
 }
 
 pub async fn cli_agents(cfg: &Config) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(5)).build()?;
+    let client = cfg.http_client(Duration::from_secs(5))?;
     let resp = client
         .get(format!("{}/api/agents", cfg.base_url()))
         .send()
@@ -448,7 +463,7 @@ pub async fn cli_agents(cfg: &Config) -> Result<()> {
 }
 
 pub async fn cli_post_empty(cfg: &Config, path: &str, ok_msg: &str) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(3)).build()?;
+    let client = cfg.http_client(Duration::from_secs(3))?;
     let resp = client
         .post(format!("{}{}", cfg.base_url(), path))
         .send()

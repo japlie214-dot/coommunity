@@ -6,8 +6,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::config::Config;
 use crate::models::{
-    AckInboxRequest, CreateThreadRequest, PostMessageRequest, RegisterAgentRequest, SendDmRequest,
-    SubscribeRequest,
+    mention_matches_agent, AckInboxRequest, CreateThreadRequest, PostMessageRequest,
+    RegisterAgentRequest, SendDmRequest, SubscribeRequest,
 };
 
 pub async fn run_mcp_stdio(
@@ -15,40 +15,33 @@ pub async fn run_mcp_stdio(
     runtime: String,
     address_override: Option<String>,
 ) -> Result<()> {
-    let client = Client::builder().timeout(Duration::from_secs(10)).build()?;
+    let client = cfg.http_client(Duration::from_secs(10))?;
     ensure_daemon_running(&cfg, &client).await?;
 
     let cwd = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().to_string());
-    let endpoint = std::env::var("CLAUDE_CODE_MESSAGING_SOCKET")
-        .ok()
-        .or_else(|| std::env::var("COOMMUNITY_CODEX_WS").ok());
-    let auth_token = std::env::var("CLAUDE_CODE_MESSAGING_TOKEN").ok();
     let session_id = std::env::var("COOMMUNITY_SESSION_ID")
         .ok()
         .or_else(|| std::env::var("CLAUDE_SESSION_ID").ok())
         .or_else(|| std::env::var("CODEX_SESSION_ID").ok())
         .or_else(|| std::env::var("AGY_CONVERSATION_ID").ok())
         .or_else(|| std::env::var("CONVERSATION_ID").ok());
-    let session_key = session_id.clone().or_else(|| endpoint.clone());
+    let session_key = session_id.clone();
 
-    // Register this MCP session automatically
+    // Register this MCP session automatically (hook-first PollOnly transport)
     let reg = RegisterAgentRequest {
-        address: address_override.or_else(|| std::env::var("COOMMUNITY_AGENT").ok()),
+        address: address_override
+            .or_else(|| std::env::var("COOM_AGENT").ok())
+            .or_else(|| std::env::var("COOMMUNITY_AGENT").ok()),
         runtime: runtime.clone(),
         session_id,
         cwd,
         status: Some("online".to_string()),
-        transport: None,
-        endpoint,
-        auth_token,
-        allow_wake_resume: Some(
-            std::env::var("COOM_WAKE_RESUME")
-                .or_else(|_| std::env::var("COOMMUNITY_WAKE_RESUME"))
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or_else(|_| runtime == "antigravity" || runtime == "codex"),
-        ),
+        transport: Some("poll_only".to_string()),
+        endpoint: None,
+        auth_token: None,
+        allow_wake_resume: None,
     };
 
     let me: Value = client
@@ -73,7 +66,7 @@ pub async fn run_mcp_stdio(
         }
     });
 
-    // Option 4: Background SSE event subscriber streaming out-of-band MCP notifications
+    // Background SSE listener that invalidates `coom://inbox` and logs incoming DMs/@mentions
     let sse_client = client.clone();
     let sse_url = format!("{}/api/events", cfg.base_url());
     let sse_my_address = my_address.clone();
@@ -114,9 +107,7 @@ pub async fn run_mcp_stdio(
                                             let is_mention = mentions.map_or(false, |arr| {
                                                 arr.iter().any(|m| {
                                                     m.as_str().map_or(false, |s| {
-                                                        s.eq_ignore_ascii_case(&sse_my_address)
-                                                            || s.eq_ignore_ascii_case("all")
-                                                            || s.eq_ignore_ascii_case("everyone")
+                                                        mention_matches_agent(s, &sse_my_address)
                                                     })
                                                 })
                                             });
@@ -128,20 +119,18 @@ pub async fn run_mcp_stdio(
                                             let is_dm = thread_kind == "dm";
 
                                             if is_dm || is_mention {
-                                                // 1. Emit out-of-band MCP logging notification
                                                 let notify = json!({
                                                     "jsonrpc": "2.0",
                                                     "method": "notifications/message",
                                                     "params": {
                                                         "level": "info",
                                                         "logger": "coom",
-                                                        "data": format!("[coom notification] From {sender}: {body}")
+                                                        "data": format!("[coom unread] From {sender}: {body}")
                                                     }
                                                 });
                                                 if let Ok(out) = serde_json::to_string(&notify) {
                                                     let _ = sse_tx.send(format!("{out}\n")).await;
                                                 }
-                                                // 2. Invalidate/update resource for inbox
                                                 let res_update = json!({
                                                     "jsonrpc": "2.0",
                                                     "method": "notifications/resources/updated",
@@ -197,9 +186,11 @@ pub async fn run_mcp_stdio(
                     },
                     "instructions": format!(
                         "You are connected to the local coom multi-agent hub as `{my_address}`. \
+                         Call `check_inbox` when reminded by hooks (or at session start in Claude Desktop) \
+                         to see unread DMs and forum @mentions. Calling `read_thread` automatically marks \
+                         that thread read; use `ack_inbox` or `ack_all_inbox` to clear reminders without reading. \
                          Use `list_agents` to discover peers, `dm` for 1-to-1 messages, and \
-                         `create_thread`/`subscribe`/`post`/`read_thread` for multi-agent forums. \
-                         Default forum subscription mode is `mentions` to prevent runaway reply loops."
+                         `create_thread`/`subscribe`/`post` for multi-agent forums."
                     )
                 }
             })),
@@ -261,7 +252,6 @@ pub async fn run_mcp_stdio(
         }
     }
 
-    // Clean shutdown: abort background SSE listener and wait for pending stdout flushes
     sse_handle.abort();
     drop(tx_out);
     let _ = stdout_handle.await;
@@ -435,10 +425,18 @@ async fn handle_tool_call(
             let thread_id = req_str(args, "thread_id")?;
             let since_seq = args.get("since_seq").and_then(|v| v.as_i64()).unwrap_or(0);
             let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
+            let auto_ack = args
+                .get("auto_ack")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
             let v: Value = client
-                .get(format!(
-                    "{base}/api/threads/{thread_id}/messages?since_seq={since_seq}&limit={limit}"
-                ))
+                .get(format!("{base}/api/threads/{thread_id}/messages"))
+                .query(&[
+                    ("since_seq", since_seq.to_string()),
+                    ("limit", limit.to_string()),
+                    ("reader", my_address.to_string()),
+                    ("auto_ack", auto_ack.to_string()),
+                ])
                 .send()
                 .await?
                 .json()
@@ -500,6 +498,15 @@ async fn handle_tool_call(
                 .await?;
             Ok(json!({ "acked": resp.status().is_success() }))
         }
+        "ack_all_inbox" => {
+            let v: Value = client
+                .post(format!("{base}/api/agents/{my_address}/inbox/ack-all"))
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
         "wait_for_message" => {
             let timeout_secs = args
                 .get("timeout_secs")
@@ -546,9 +553,7 @@ async fn handle_tool_call(
                                                     let is_mention = mentions.map_or(false, |arr| {
                                                         arr.iter().any(|m| {
                                                             m.as_str().map_or(false, |s| {
-                                                                s.eq_ignore_ascii_case(my_address)
-                                                                    || s.eq_ignore_ascii_case("all")
-                                                                    || s.eq_ignore_ascii_case("everyone")
+                                                                mention_matches_agent(s, my_address)
                                                             })
                                                         })
                                                     });
@@ -641,7 +646,7 @@ pub fn tool_definitions() -> Value {
                     "description": { "type": "string", "description": "Optional context or goal for the thread" },
                     "members": { "type": "array", "items": { "type": "string" }, "description": "Agent addresses to subscribe" },
                     "default_mode": { "type": "string", "enum": ["mentions", "digest", "all", "muted"], "description": "Initial subscription mode (default: mentions)" },
-                    "max_hops": { "type": "integer", "description": "Max automatic agent replies before pausing push (default: 8)" }
+                    "max_hops": { "type": "integer", "description": "Max automatic agent replies before pausing notifications (default: 8)" }
                 },
                 "required": ["title"]
             }
@@ -653,7 +658,7 @@ pub fn tool_definitions() -> Value {
         },
         {
             "name": "post",
-            "description": "Post a message to a forum or DM thread. Include @agent:name in body or mentions array to wake mention-subscribed agents.",
+            "description": "Post a message to a forum or DM thread. Include @agent:name or @codex/@cc/@agy in body or mentions array to notify agents via unread reminders.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -667,13 +672,14 @@ pub fn tool_definitions() -> Value {
         },
         {
             "name": "read_thread",
-            "description": "Read messages in a thread after an optional sequence number.",
+            "description": "Read messages in a thread after an optional sequence number. Automatically marks the returned messages as read unless auto_ack is false.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "thread_id": { "type": "string" },
                     "since_seq": { "type": "integer", "default": 0 },
-                    "limit": { "type": "integer", "default": 50 }
+                    "limit": { "type": "integer", "default": 50 },
+                    "auto_ack": { "type": "boolean", "default": true, "description": "Automatically advance read cursor to the latest returned message" }
                 },
                 "required": ["thread_id"]
             }
@@ -701,12 +707,12 @@ pub fn tool_definitions() -> Value {
         },
         {
             "name": "check_inbox",
-            "description": "Check unread DMs and subscribed forum updates for this agent.",
+            "description": "Check unread DMs and forum @mentions/updates for this agent.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "ack_inbox",
-            "description": "Mark a thread read up to a given message sequence number.",
+            "description": "Mark a specific thread read up to a given message sequence number.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -715,6 +721,11 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["thread_id", "up_to_seq"]
             }
+        },
+        {
+            "name": "ack_all_inbox",
+            "description": "Mark all subscribed threads read for this agent to clear all unread hook reminders.",
+            "inputSchema": { "type": "object", "properties": {} }
         },
         {
             "name": "wait_for_message",

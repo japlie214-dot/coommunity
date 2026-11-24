@@ -1,4 +1,11 @@
+use anyhow::{Context, Result};
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::Client;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
+use std::time::Duration;
+use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -6,6 +13,7 @@ pub struct Config {
     pub port: u16,
     pub data_dir: PathBuf,
     pub db_path: PathBuf,
+    pub token_path: PathBuf,
     pub default_max_hops: i64,
     pub digest_window_secs: u64,
     pub codex_app_server_port: u16,
@@ -51,12 +59,14 @@ impl Config {
             });
 
         let db_path = data_dir.join("coommunity.db");
+        let token_path = data_dir.join("token");
 
         Self {
             host,
             port,
             data_dir,
             db_path,
+            token_path,
             default_max_hops,
             digest_window_secs,
             codex_app_server_port,
@@ -69,6 +79,70 @@ impl Config {
 
     pub fn codex_ws_url(&self) -> String {
         format!("ws://127.0.0.1:{}", self.codex_app_server_port)
+    }
+
+    /// Loads or atomically creates the local per-user bearer token stored at `~/.coommunity/token`.
+    /// Env vars `COOM_TOKEN` / `COOMMUNITY_TOKEN` take precedence if explicitly set.
+    pub fn load_or_create_token(&self) -> Result<String> {
+        if let Ok(env_tok) = std::env::var("COOM_TOKEN")
+            .or_else(|_| std::env::var("COOMMUNITY_TOKEN"))
+        {
+            let trimmed = env_tok.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        if let Ok(existing) = std::fs::read_to_string(&self.token_path) {
+            let trimmed = existing.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_string());
+            }
+        }
+
+        std::fs::create_dir_all(&self.data_dir).with_context(|| {
+            format!("failed to create data dir {}", self.data_dir.display())
+        })?;
+
+        let generated = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&self.token_path)
+        {
+            Ok(mut file) => {
+                file.write_all(generated.as_bytes())?;
+                file.flush()?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(
+                        &self.token_path,
+                        std::fs::Permissions::from_mode(0o600),
+                    );
+                }
+                Ok(generated)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                let existing = std::fs::read_to_string(&self.token_path)?;
+                Ok(existing.trim().to_string())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Builds an HTTP client pre-configured with the local `Authorization: Bearer <token>` header.
+    pub fn http_client(&self, timeout: Duration) -> Result<Client> {
+        let mut headers = HeaderMap::new();
+        if let Ok(token) = self.load_or_create_token() {
+            if let Ok(val) = HeaderValue::from_str(&format!("Bearer {token}")) {
+                headers.insert(AUTHORIZATION, val);
+            }
+        }
+        Ok(Client::builder()
+            .timeout(timeout)
+            .default_headers(headers)
+            .build()?)
     }
 }
 

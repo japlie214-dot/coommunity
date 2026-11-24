@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -42,18 +43,80 @@ impl RuntimeKind {
     }
 }
 
+/// Shared slug sanitizer used by both DB agent registration and hook cleanup.
+pub fn sanitize_slug(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Deterministically derives the default agent address (`<prefix>:<cwd_slug>`) when no
+/// explicit `COOM_AGENT` override is supplied.
+pub fn derive_agent_address(
+    runtime: &RuntimeKind,
+    cwd: Option<&str>,
+    fallback_suffix: Option<&str>,
+) -> Option<String> {
+    let suffix = cwd
+        .and_then(|p| Path::new(p).file_name())
+        .and_then(|n| n.to_str())
+        .map(sanitize_slug)
+        .filter(|s| !s.is_empty())
+        .or_else(|| fallback_suffix.map(str::to_string));
+    suffix.map(|s| format!("{}:{}", runtime.prefix(), s))
+}
+
+/// Checks whether a mention token (e.g. `cc:repo`, `cc`, `claude`, `codex`, `agy`, `all`, `everyone`)
+/// targets the given canonical `agent_address`.
+pub fn mention_matches_agent(mention: &str, agent_address: &str) -> bool {
+    let clean = mention.trim().trim_start_matches('@');
+    if clean.is_empty() {
+        return false;
+    }
+    if clean.eq_ignore_ascii_case(agent_address)
+        || clean.eq_ignore_ascii_case("all")
+        || clean.eq_ignore_ascii_case("everyone")
+    {
+        return true;
+    }
+
+    let addr_lower = agent_address.to_ascii_lowercase();
+    match clean.to_ascii_lowercase().as_str() {
+        "cc" | "claude" | "claude_code" | "claude-code" => {
+            addr_lower.starts_with("cc:") || addr_lower.starts_with("cc-desktop:")
+        }
+        "cc-desktop" | "claude_desktop" | "claude-desktop" => {
+            addr_lower.starts_with("cc-desktop:")
+        }
+        "codex" | "codex-cli" | "codex_cli" => addr_lower.starts_with("codex:"),
+        "agy" | "antigravity" | "antigravity-cli" => addr_lower.starts_with("agy:"),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TransportKind {
-    /// Tier 1: Claude Code native Windows named pipe or Unix domain socket
+    /// Legacy Tier 1 variant (kept for backward-compatible DB deserialization)
     ClaudePipe,
-    /// Tier 1: Codex app-server WebSocket JSON-RPC 2.0 (`turn/start`)
+    /// Legacy Tier 1 variant (kept for backward-compatible DB deserialization)
     CodexAppServer,
-    /// Tier 2: Headless wake-on-idle via `codex exec resume <session_id>`
+    /// Legacy Tier 2 variant (kept for backward-compatible DB deserialization)
     CodexResume,
-    /// Tier 2: Headless wake-on-idle via `agy --conversation=<session_id> -p`
+    /// Legacy Tier 2 variant (kept for backward-compatible DB deserialization)
     AgyResume,
-    /// Tier 3: Hook banner / MCP check_inbox pull only
+    /// Primary strategy: Hook unread auto-reminder + MCP check_inbox / read_thread pull
     PollOnly,
 }
 
@@ -117,13 +180,13 @@ pub struct Agent {
     pub cwd: Option<String>,
     pub status: AgentStatus,
     pub transport: TransportKind,
-    /// Named pipe / UDS path for ClaudePipe, or ws:// URL for CodexAppServer
+    /// Optional legacy endpoint metadata
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
-    /// Auth token for Claude Code Windows named pipe (never exposed to public viewer)
+    /// Optional legacy auth token (never exposed to public viewer)
     #[serde(skip_serializing)]
     pub auth_token: Option<String>,
-    /// Whether Tier 2 headless wake-on-idle is allowed for this agent
+    /// Legacy opt-in flag (preserved across hook heartbeats)
     pub allow_wake_resume: bool,
     pub last_seen_at: String,
     pub registered_at: String,
@@ -155,13 +218,13 @@ impl ThreadKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SubscriptionMode {
-    /// Wake only when explicitly @mentioned or @all
+    /// Remind only when explicitly @mentioned or @all
     Mentions,
-    /// Buffer updates over digest_window_secs and push a single batched digest
+    /// Track all unread updates for batched review
     Digest,
-    /// Immediate push on every new message
+    /// Track every new message in the thread as unread
     All,
-    /// Never push; agent can still read manually
+    /// Never remind; agent can still read manually
     Muted,
 }
 
@@ -239,6 +302,8 @@ pub struct InboxItem {
     pub thread_title: String,
     pub thread_kind: ThreadKind,
     pub unread_count: i64,
+    #[serde(default)]
+    pub mentioned_count: i64,
     pub latest_seq: i64,
     pub latest_sender: String,
     pub latest_preview: String,

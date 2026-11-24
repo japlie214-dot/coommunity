@@ -1,22 +1,24 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
+    extract::{Path, Query, Request, State},
+    http::{header, HeaderValue, Method, StatusCode},
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse,
+        Html, IntoResponse, Response,
     },
     routing::{delete, get, post},
     Json, Router,
 };
 use futures_util::stream::Stream;
 use serde::Deserialize;
+use serde_json::json;
 use std::convert::Infallible;
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt as _;
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::info;
 
 use crate::config::Config;
@@ -34,9 +36,21 @@ pub struct AppState {
     pub db: Database,
     pub dispatcher: Dispatcher,
     pub events: broadcast::Sender<HubEvent>,
+    pub api_token: String,
+}
+
+async fn run_db<F, T>(db: Database, f: F) -> Result<T>
+where
+    F: FnOnce(&Database) -> Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || f(&db))
+        .await
+        .map_err(|e| anyhow!("database worker task failed: {e}"))?
 }
 
 pub async fn run_daemon(cfg: Config) -> Result<()> {
+    let api_token = cfg.load_or_create_token()?;
     let db = Database::open(&cfg.db_path)?;
     let (events, _) = broadcast::channel::<HubEvent>(512);
     let dispatcher = Dispatcher::new(db.clone(), cfg.clone(), events.clone());
@@ -46,7 +60,17 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         db,
         dispatcher,
         events,
+        api_token,
     };
+
+    let allowed_origins = [
+        HeaderValue::from_str(&format!("http://127.0.0.1:{}", cfg.port))?,
+        HeaderValue::from_str(&format!("http://localhost:{}", cfg.port))?,
+    ];
+    let cors = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allowed_origins))
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
 
     let app = Router::new()
         // Read-only local web viewer
@@ -54,10 +78,11 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         .route("/api/health", get(health))
         .route("/api/snapshot", get(snapshot))
         .route("/api/events", get(sse_events))
-        // Agents
+        // Agents & Inbox
         .route("/api/agents", get(list_agents).post(register_agent))
         .route("/api/agents/:address/status", post(set_agent_status))
         .route("/api/agents/:address/inbox", get(check_inbox))
+        .route("/api/agents/:address/inbox/ack-all", post(ack_all_inbox))
         .route("/api/inbox/ack", post(ack_inbox))
         // Threads & Messages
         .route("/api/threads", get(list_threads).post(create_thread))
@@ -75,7 +100,8 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         // Global Controls
         .route("/api/hub/pause", post(pause_hub))
         .route("/api/hub/resume", post(resume_hub))
-        .layer(CorsLayer::permissive())
+        .layer(middleware::from_fn_with_state(state.clone(), require_local_auth))
+        .layer(cors)
         .with_state(state);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
@@ -83,6 +109,7 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
     info!(
         url = %cfg.base_url(),
         db = %cfg.db_path.display(),
+        token = %cfg.token_path.display(),
         "coommunityd listening (read-only viewer at /)"
     );
     axum::serve(listener, app)
@@ -90,6 +117,51 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         .await?;
     info!("coom daemon shut down cleanly");
     Ok(())
+}
+
+/// Requires `Authorization: Bearer <token>` on all mutating endpoints and private inbox reads,
+/// while keeping the local read-only web viewer routes (`/`, `/api/health`, `/api/snapshot`,
+/// `/api/events`, and read-only `GET` thread listings) accessible to localhost browsers.
+async fn require_local_auth(
+    State(st): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Response {
+    let method = req.method().clone();
+    let path = req.uri().path();
+    let query = req.uri().query().unwrap_or("");
+
+    let is_public_readonly = method == Method::GET
+        && (path == "/"
+            || path == "/api/health"
+            || path == "/api/snapshot"
+            || path == "/api/events"
+            || path == "/api/agents"
+            || path == "/api/threads"
+            || (path.starts_with("/api/threads/")
+                && (path.ends_with("/subscriptions")
+                    || (path.ends_with("/messages") && !query.contains("reader=")))));
+
+    if is_public_readonly || method == Method::OPTIONS {
+        return next.run(req).await;
+    }
+
+    let provided = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::trim);
+
+    if provided == Some(st.api_token.as_str()) {
+        next.run(req).await
+    } else {
+        (
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid local bearer token (see ~/.coommunity/token)",
+        )
+            .into_response()
+    }
 }
 
 async fn shutdown_signal() {
@@ -121,22 +193,23 @@ async fn index_html() -> Html<&'static str> {
 }
 
 async fn health(State(st): State<AppState>) -> impl IntoResponse {
-    match st.db.hub_status() {
+    match run_db(st.db.clone(), |db| db.hub_status()).await {
         Ok(s) => (StatusCode::OK, Json(s)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
 async fn snapshot(State(st): State<AppState>) -> impl IntoResponse {
-    let res = (|| -> Result<SnapshotResponse> {
+    let res = run_db(st.db.clone(), |db| {
         Ok(SnapshotResponse {
-            status: st.db.hub_status()?,
-            agents: st.db.list_agents()?,
-            threads: st.db.list_threads()?,
-            subscriptions: st.db.list_subscriptions(None)?,
-            recent_deliveries: st.db.recent_deliveries(40)?,
+            status: db.hub_status()?,
+            agents: db.list_agents()?,
+            threads: db.list_threads()?,
+            subscriptions: db.list_subscriptions(None)?,
+            recent_deliveries: db.recent_deliveries(40)?,
         })
-    })();
+    })
+    .await;
     match res {
         Ok(snap) => (StatusCode::OK, Json(snap)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -158,7 +231,7 @@ async fn sse_events(
 }
 
 async fn list_agents(State(st): State<AppState>) -> impl IntoResponse {
-    match st.db.list_agents() {
+    match run_db(st.db.clone(), |db| db.list_agents()).await {
         Ok(agents) => (StatusCode::OK, Json(agents)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -168,7 +241,7 @@ async fn register_agent(
     State(st): State<AppState>,
     Json(req): Json<RegisterAgentRequest>,
 ) -> impl IntoResponse {
-    match st.db.upsert_agent(&req) {
+    match run_db(st.db.clone(), move |db| db.upsert_agent(&req)).await {
         Ok(agent) => {
             let _ = st.events.send(HubEvent::AgentUpdated {
                 agent: agent.clone(),
@@ -190,13 +263,12 @@ async fn set_agent_status(
     Path(address): Path<String>,
     Json(body): Json<StatusBody>,
 ) -> impl IntoResponse {
-    match st
-        .db
-        .set_agent_session_status(
-            &address,
-            body.session_id.as_deref(),
-            AgentStatus::from_str(&body.status),
-        )
+    let status = AgentStatus::from_str(&body.status);
+    let session_id = body.session_id;
+    match run_db(st.db.clone(), move |db| {
+        db.set_agent_session_status(&address, session_id.as_deref(), status)
+    })
+    .await
     {
         Ok(Some(agent)) => {
             let _ = st.events.send(HubEvent::AgentUpdated {
@@ -213,7 +285,7 @@ async fn check_inbox(
     State(st): State<AppState>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    match st.db.check_inbox(&address) {
+    match run_db(st.db.clone(), move |db| db.check_inbox(&address)).await {
         Ok(items) => (StatusCode::OK, Json(items)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -223,17 +295,28 @@ async fn ack_inbox(
     State(st): State<AppState>,
     Json(req): Json<AckInboxRequest>,
 ) -> impl IntoResponse {
-    match st
-        .db
-        .ack_inbox(&req.agent_address, &req.thread_id, req.up_to_seq)
+    match run_db(st.db.clone(), move |db| {
+        db.ack_inbox(&req.agent_address, &req.thread_id, req.up_to_seq)
+    })
+    .await
     {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
+async fn ack_all_inbox(
+    State(st): State<AppState>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    match run_db(st.db.clone(), move |db| db.ack_all_inbox(&address)).await {
+        Ok(updated) => (StatusCode::OK, Json(json!({ "acked_threads": updated }))).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
 async fn list_threads(State(st): State<AppState>) -> impl IntoResponse {
-    match st.db.list_threads() {
+    match run_db(st.db.clone(), |db| db.list_threads()).await {
         Ok(threads) => (StatusCode::OK, Json(threads)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -249,14 +332,18 @@ async fn create_thread(
         .map(SubscriptionMode::from_str)
         .unwrap_or(SubscriptionMode::Mentions);
     let max_hops = req.max_hops.unwrap_or(st.cfg.default_max_hops);
-    match st.db.create_forum_thread(
-        &req.title,
-        req.description.as_deref(),
-        &req.created_by,
-        &req.members,
-        mode,
-        max_hops,
-    ) {
+    match run_db(st.db.clone(), move |db| {
+        db.create_forum_thread(
+            &req.title,
+            req.description.as_deref(),
+            &req.created_by,
+            &req.members,
+            mode,
+            max_hops,
+        )
+    })
+    .await
+    {
         Ok(thread) => {
             let _ = st.events.send(HubEvent::ThreadUpdated {
                 thread: thread.clone(),
@@ -271,6 +358,8 @@ async fn create_thread(
 struct ReadQuery {
     since_seq: Option<i64>,
     limit: Option<i64>,
+    reader: Option<String>,
+    auto_ack: Option<bool>,
 }
 
 async fn read_messages(
@@ -278,9 +367,14 @@ async fn read_messages(
     Path(id): Path<String>,
     Query(q): Query<ReadQuery>,
 ) -> impl IntoResponse {
-    match st
-        .db
-        .read_messages(&id, q.since_seq.unwrap_or(0), q.limit.unwrap_or(100))
+    let since_seq = q.since_seq.unwrap_or(0);
+    let limit = q.limit.unwrap_or(100);
+    let reader = q.reader;
+    let auto_ack = q.auto_ack.unwrap_or(true);
+    match run_db(st.db.clone(), move |db| {
+        db.read_messages_for_agent(&id, since_seq, limit, reader.as_deref(), auto_ack)
+    })
+    .await
     {
         Ok(msgs) => (StatusCode::OK, Json(msgs)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -292,17 +386,17 @@ async fn post_message(
     Path(id): Path<String>,
     Json(req): Json<PostMessageRequest>,
 ) -> impl IntoResponse {
-    match st
-        .db
-        .post_message(&id, &req.sender, &req.body, &req.mentions, req.ack_only)
+    match run_db(st.db.clone(), move |db| {
+        db.post_message(&id, &req.sender, &req.body, &req.mentions, req.ack_only)
+    })
+    .await
     {
         Ok((message, thread)) => {
             let _ = st.events.send(HubEvent::MessagePosted {
                 message: message.clone(),
                 thread: thread.clone(),
             });
-            st.dispatcher
-                .dispatch_message(thread, message.clone());
+            st.dispatcher.dispatch_message(thread, message.clone());
             (StatusCode::CREATED, Json(message)).into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -310,19 +404,21 @@ async fn post_message(
 }
 
 async fn send_dm(State(st): State<AppState>, Json(req): Json<SendDmRequest>) -> impl IntoResponse {
-    let resolved_to = st.db.resolve_recipient_alias(&req.to);
-    let thread = match st
-        .db
-        .get_or_create_dm_thread(&req.from, &resolved_to, st.cfg.default_max_hops)
-    {
-        Ok(t) => t,
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
-    };
+    let max_hops = st.cfg.default_max_hops;
+    let res = run_db(st.db.clone(), move |db| {
+        let resolved_to = db.resolve_recipient_alias(&req.to);
+        let thread = db.get_or_create_dm_thread(&req.from, &resolved_to, max_hops)?;
+        db.post_message(
+            &thread.id,
+            &req.from,
+            &req.body,
+            &[resolved_to],
+            req.ack_only,
+        )
+    })
+    .await;
 
-    match st
-        .db
-        .post_message(&thread.id, &req.from, &req.body, &[resolved_to.clone()], req.ack_only)
-    {
+    match res {
         Ok((message, updated_thread)) => {
             let _ = st.events.send(HubEvent::MessagePosted {
                 message: message.clone(),
@@ -340,7 +436,7 @@ async fn list_thread_subs(
     State(st): State<AppState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    match st.db.list_subscriptions(Some(&id)) {
+    match run_db(st.db.clone(), move |db| db.list_subscriptions(Some(&id))).await {
         Ok(subs) => (StatusCode::OK, Json(subs)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -352,7 +448,11 @@ async fn subscribe(
     Json(req): Json<SubscribeRequest>,
 ) -> impl IntoResponse {
     let mode = SubscriptionMode::from_str(&req.mode);
-    match st.db.upsert_subscription(&id, &req.agent_address, mode) {
+    match run_db(st.db.clone(), move |db| {
+        db.upsert_subscription(&id, &req.agent_address, mode)
+    })
+    .await
+    {
         Ok(sub) => {
             let _ = st.events.send(HubEvent::SubscriptionUpdated {
                 subscription: sub.clone(),
@@ -367,7 +467,7 @@ async fn unsubscribe(
     State(st): State<AppState>,
     Path((id, agent)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    match st.db.remove_subscription(&id, &agent) {
+    match run_db(st.db.clone(), move |db| db.remove_subscription(&id, &agent)).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
@@ -375,7 +475,7 @@ async fn unsubscribe(
 }
 
 async fn mute_thread(State(st): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
-    match st.db.set_thread_muted(&id, true) {
+    match run_db(st.db.clone(), move |db| db.set_thread_muted(&id, true)).await {
         Ok(Some(thread)) => {
             let _ = st.events.send(HubEvent::ThreadUpdated {
                 thread: thread.clone(),
@@ -388,7 +488,7 @@ async fn mute_thread(State(st): State<AppState>, Path(id): Path<String>) -> impl
 }
 
 async fn unmute_thread(State(st): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
-    match st.db.set_thread_muted(&id, false) {
+    match run_db(st.db.clone(), move |db| db.set_thread_muted(&id, false)).await {
         Ok(Some(thread)) => {
             let _ = st.events.send(HubEvent::ThreadUpdated {
                 thread: thread.clone(),
@@ -401,7 +501,7 @@ async fn unmute_thread(State(st): State<AppState>, Path(id): Path<String>) -> im
 }
 
 async fn reset_hops(State(st): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
-    match st.db.reset_thread_hops(&id) {
+    match run_db(st.db.clone(), move |db| db.reset_thread_hops(&id)).await {
         Ok(Some(thread)) => {
             let _ = st.events.send(HubEvent::ThreadUpdated {
                 thread: thread.clone(),
@@ -414,7 +514,7 @@ async fn reset_hops(State(st): State<AppState>, Path(id): Path<String>) -> impl 
 }
 
 async fn pause_hub(State(st): State<AppState>) -> impl IntoResponse {
-    match st.db.set_paused(true) {
+    match run_db(st.db.clone(), |db| db.set_paused(true)).await {
         Ok(()) => {
             let _ = st.events.send(HubEvent::HubPausedChanged { paused: true });
             StatusCode::NO_CONTENT.into_response()
@@ -424,7 +524,7 @@ async fn pause_hub(State(st): State<AppState>) -> impl IntoResponse {
 }
 
 async fn resume_hub(State(st): State<AppState>) -> impl IntoResponse {
-    match st.db.set_paused(false) {
+    match run_db(st.db.clone(), |db| db.set_paused(false)).await {
         Ok(()) => {
             let _ = st.events.send(HubEvent::HubPausedChanged { paused: false });
             StatusCode::NO_CONTENT.into_response()

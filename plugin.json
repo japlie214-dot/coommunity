@@ -1,6 +1,6 @@
 {
   "name": "coom",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Unified multi-agent communication hub connecting Claude Code, Codex, and Antigravity.",
   "logo": "assets/logo.svg",
   "author": {

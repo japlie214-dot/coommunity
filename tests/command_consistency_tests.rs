@@ -119,7 +119,7 @@ fn test_mcp_resource_catalog_definitions() {
 fn test_wait_for_message_tool_definition() {
     let tools = coommunity::mcp::tool_definitions();
     let tools_arr = tools.as_array().expect("tools must be array");
-    assert_eq!(tools_arr.len(), 13);
+    assert_eq!(tools_arr.len(), 14);
 
     let wait_tool = tools_arr
         .iter()
@@ -128,4 +128,10 @@ fn test_wait_for_message_tool_definition() {
 
     let schema = wait_tool.get("inputSchema").expect("inputSchema required");
     assert!(schema["properties"]["timeout_secs"].is_object());
+
+    let ack_all_tool = tools_arr
+        .iter()
+        .find(|t| t.get("name").and_then(|n| n.as_str()) == Some("ack_all_inbox"))
+        .expect("ack_all_inbox tool must be defined");
+    assert!(ack_all_tool.get("description").is_some());
 }

@@ -1,13 +1,15 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use uuid::Uuid;
 
 use crate::models::{
-    Agent, AgentStatus, DeliveryRecord, HubStatus, InboxItem, Message, RegisterAgentRequest,
-    RuntimeKind, Subscription, SubscriptionMode, Thread, ThreadKind, TransportKind,
+    derive_agent_address, mention_matches_agent, sanitize_slug, Agent, AgentStatus, DeliveryRecord,
+    HubStatus, InboxItem, Message, RegisterAgentRequest, RuntimeKind, Subscription,
+    SubscriptionMode, Thread, ThreadKind, TransportKind,
 };
 
 #[derive(Clone)]
@@ -122,8 +124,14 @@ impl Database {
         })
     }
 
+    fn lock_conn(&self) -> Result<MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|_| anyhow!("sqlite connection mutex poisoned"))
+    }
+
     pub fn is_paused(&self) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let val: Option<String> = conn
             .query_row(
                 "SELECT value FROM hub_meta WHERE key = 'paused'",
@@ -135,7 +143,7 @@ impl Database {
     }
 
     pub fn set_paused(&self, paused: bool) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO hub_meta (key, value) VALUES ('paused', ?1)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -147,23 +155,19 @@ impl Database {
     pub fn upsert_agent(&self, req: &RegisterAgentRequest) -> Result<Agent> {
         let now = Utc::now().to_rfc3339();
         let runtime = RuntimeKind::from_str(&req.runtime);
-        let address = req.address.clone().unwrap_or_else(|| {
-            let suffix = req
-                .cwd
-                .as_deref()
-                .and_then(|p| Path::new(p).file_name())
-                .and_then(|n| n.to_str())
-                .map(sanitize_slug)
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| Uuid::new_v4().to_string()[..6].to_string());
-            format!("{}:{}", runtime.prefix(), suffix)
-        });
+        let fallback_id = Uuid::new_v4().to_string()[..6].to_string();
+        let address = req
+            .address
+            .clone()
+            .filter(|a| !a.trim().is_empty())
+            .or_else(|| derive_agent_address(&runtime, req.cwd.as_deref(), Some(&fallback_id)))
+            .unwrap_or_else(|| format!("{}:{}", runtime.prefix(), fallback_id));
 
         let transport = req
             .transport
             .as_deref()
             .map(TransportKind::from_str)
-            .unwrap_or_else(|| infer_transport(&runtime, req.endpoint.as_deref()));
+            .unwrap_or(TransportKind::PollOnly);
 
         let status = req
             .status
@@ -171,75 +175,79 @@ impl Database {
             .map(AgentStatus::from_str)
             .unwrap_or(AgentStatus::Online);
 
-        let allow_wake = req.allow_wake_resume.unwrap_or(false);
+        // Preserve existing allow_wake_resume when callers (such as hooks) pass None.
+        let allow_wake_opt: Option<i64> = req.allow_wake_resume.map(|b| if b { 1 } else { 0 });
 
-        let session_key = req.session_id.clone()
+        let session_key = req
+            .session_id
+            .clone()
             .or_else(|| req.endpoint.clone())
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
-        let conn = self.conn.lock().unwrap();
+        {
+            let conn = self.lock_conn()?;
 
-        // Track active session instance without clobbering other windows in the same workspace
-        conn.execute(
-            "INSERT INTO agent_sessions (
-                id, agent_address, endpoint, auth_token, status, last_seen_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-            ON CONFLICT(id) DO UPDATE SET
-                endpoint = COALESCE(excluded.endpoint, agent_sessions.endpoint),
-                auth_token = COALESCE(excluded.auth_token, agent_sessions.auth_token),
-                status = excluded.status,
-                last_seen_at = excluded.last_seen_at",
-            params![
-                &session_key,
-                &address,
-                &req.endpoint,
-                &req.auth_token,
-                status.as_str(),
-                &now,
-            ],
-        )?;
+            // Track active session instance without clobbering sibling windows in the same cwd
+            conn.execute(
+                "INSERT INTO agent_sessions (
+                    id, agent_address, endpoint, auth_token, status, last_seen_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(id) DO UPDATE SET
+                    endpoint = COALESCE(excluded.endpoint, agent_sessions.endpoint),
+                    auth_token = COALESCE(excluded.auth_token, agent_sessions.auth_token),
+                    status = excluded.status,
+                    last_seen_at = excluded.last_seen_at",
+                params![
+                    &session_key,
+                    &address,
+                    &req.endpoint,
+                    &req.auth_token,
+                    status.as_str(),
+                    &now,
+                ],
+            )?;
 
-        let existing_reg: Option<String> = conn
-            .query_row(
-                "SELECT registered_at FROM agents WHERE address = ?1",
-                params![&address],
-                |r| r.get(0),
-            )
-            .optional()?;
+            let existing_reg: Option<String> = conn
+                .query_row(
+                    "SELECT registered_at FROM agents WHERE address = ?1",
+                    params![&address],
+                    |r| r.get(0),
+                )
+                .optional()?;
 
-        let registered_at = existing_reg.unwrap_or_else(|| now.clone());
+            let registered_at = existing_reg.unwrap_or_else(|| now.clone());
 
-        conn.execute(
-            "INSERT INTO agents (
-                address, runtime, session_id, cwd, status, transport,
-                endpoint, auth_token, allow_wake_resume, last_seen_at, registered_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            ON CONFLICT(address) DO UPDATE SET
-                runtime = excluded.runtime,
-                session_id = COALESCE(excluded.session_id, agents.session_id),
-                cwd = COALESCE(excluded.cwd, agents.cwd),
-                status = excluded.status,
-                transport = excluded.transport,
-                endpoint = COALESCE(excluded.endpoint, agents.endpoint),
-                auth_token = COALESCE(excluded.auth_token, agents.auth_token),
-                allow_wake_resume = excluded.allow_wake_resume,
-                last_seen_at = excluded.last_seen_at",
-            params![
-                &address,
-                runtime.as_str(),
-                &req.session_id,
-                &req.cwd,
-                status.as_str(),
-                transport.as_str(),
-                &req.endpoint,
-                &req.auth_token,
-                if allow_wake { 1 } else { 0 },
-                &now,
-                &registered_at,
-            ],
-        )?;
+            conn.execute(
+                "INSERT INTO agents (
+                    address, runtime, session_id, cwd, status, transport,
+                    endpoint, auth_token, allow_wake_resume, last_seen_at, registered_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, COALESCE(?9, 0), ?10, ?11)
+                 ON CONFLICT(address) DO UPDATE SET
+                    runtime = excluded.runtime,
+                    session_id = COALESCE(excluded.session_id, agents.session_id),
+                    cwd = COALESCE(excluded.cwd, agents.cwd),
+                    status = excluded.status,
+                    transport = excluded.transport,
+                    endpoint = COALESCE(excluded.endpoint, agents.endpoint),
+                    auth_token = COALESCE(excluded.auth_token, agents.auth_token),
+                    allow_wake_resume = COALESCE(?9, agents.allow_wake_resume),
+                    last_seen_at = excluded.last_seen_at",
+                params![
+                    &address,
+                    runtime.as_str(),
+                    &req.session_id,
+                    &req.cwd,
+                    status.as_str(),
+                    transport.as_str(),
+                    &req.endpoint,
+                    &req.auth_token,
+                    allow_wake_opt,
+                    &now,
+                    &registered_at,
+                ],
+            )?;
+        }
 
-        drop(conn);
         self.get_agent(&address)?
             .context("agent missing immediately after upsert")
     }
@@ -255,49 +263,50 @@ impl Database {
         status: AgentStatus,
     ) -> Result<Option<Agent>> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        {
+            let conn = self.lock_conn()?;
 
-        if let Some(sid) = session_id {
-            conn.execute(
-                "UPDATE agent_sessions SET status = ?1, last_seen_at = ?2 WHERE id = ?3",
-                params![status.as_str(), &now, sid],
-            )?;
-
-            if status == AgentStatus::Offline {
-                let online_count: i64 = conn.query_row(
-                    "SELECT COUNT(*) FROM agent_sessions WHERE agent_address = ?1 AND status = 'online'",
-                    params![address],
-                    |r| r.get(0),
+            if let Some(sid) = session_id {
+                conn.execute(
+                    "UPDATE agent_sessions SET status = ?1, last_seen_at = ?2 WHERE id = ?3",
+                    params![status.as_str(), &now, sid],
                 )?;
-                if online_count == 0 {
+
+                if status == AgentStatus::Offline {
+                    let online_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM agent_sessions WHERE agent_address = ?1 AND status = 'online'",
+                        params![address],
+                        |r| r.get(0),
+                    )?;
+                    if online_count == 0 {
+                        conn.execute(
+                            "UPDATE agents SET status = 'offline', last_seen_at = ?1 WHERE address = ?2",
+                            params![&now, address],
+                        )?;
+                    }
+                } else {
                     conn.execute(
-                        "UPDATE agents SET status = 'offline', last_seen_at = ?1 WHERE address = ?2",
-                        params![&now, address],
+                        "UPDATE agents SET status = ?1, last_seen_at = ?2 WHERE address = ?3",
+                        params![status.as_str(), &now, address],
                     )?;
                 }
             } else {
+                conn.execute(
+                    "UPDATE agent_sessions SET status = ?1, last_seen_at = ?2 WHERE agent_address = ?3",
+                    params![status.as_str(), &now, address],
+                )?;
                 conn.execute(
                     "UPDATE agents SET status = ?1, last_seen_at = ?2 WHERE address = ?3",
                     params![status.as_str(), &now, address],
                 )?;
             }
-        } else {
-            conn.execute(
-                "UPDATE agent_sessions SET status = ?1, last_seen_at = ?2 WHERE agent_address = ?3",
-                params![status.as_str(), &now, address],
-            )?;
-            conn.execute(
-                "UPDATE agents SET status = ?1, last_seen_at = ?2 WHERE address = ?3",
-                params![status.as_str(), &now, address],
-            )?;
         }
 
-        drop(conn);
         self.get_agent(address)
     }
 
     pub fn get_active_sessions(&self, address: &str) -> Result<Vec<(Option<String>, Option<String>)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT endpoint, auth_token FROM agent_sessions 
              WHERE agent_address = ?1 AND status = 'online'
@@ -314,39 +323,43 @@ impl Database {
     }
 
     pub fn resolve_recipient_alias(&self, target: &str) -> String {
-        let normalized = target.to_ascii_lowercase();
+        let normalized = target.trim().trim_start_matches('@').to_ascii_lowercase();
         let runtime_match = match normalized.as_str() {
-            "cc" | "claude" => Some("claude"),
-            "codex" => Some("codex"),
-            "agy" | "antigravity" => Some("antigravity"),
+            "cc" | "claude" | "claude_code" | "claude-code" => Some(("claude", "cc:%")),
+            "cc-desktop" | "claude_desktop" | "claude-desktop" => {
+                Some(("claude_desktop", "cc-desktop:%"))
+            }
+            "codex" | "codex-cli" | "codex_cli" => Some(("codex", "codex:%")),
+            "agy" | "antigravity" | "antigravity-cli" => Some(("antigravity", "agy:%")),
             _ => None,
         };
 
-        if let Some(rt_prefix) = runtime_match {
-            let conn = self.conn.lock().unwrap();
-            let resolved: Result<Option<String>, _> = conn.query_row(
-                "SELECT address FROM agents 
-                 WHERE (runtime LIKE ?1 OR address LIKE ?2) AND status = 'online'
-                 ORDER BY last_seen_at DESC LIMIT 1",
-                params![format!("%{rt_prefix}%"), format!("{normalized}:%")],
-                |r| r.get(0),
-            );
-            if let Ok(Some(addr)) = resolved {
-                return addr;
-            }
-            let fallback: Result<Option<String>, _> = conn.query_row(
-                "SELECT address FROM agents 
-                 WHERE (runtime LIKE ?1 OR address LIKE ?2)
-                 ORDER BY last_seen_at DESC LIMIT 1",
-                params![format!("%{rt_prefix}%"), format!("{normalized}:%")],
-                |r| r.get(0),
-            );
-            if let Ok(Some(addr)) = fallback {
-                return addr;
+        if let Some((rt_prefix, addr_like)) = runtime_match {
+            if let Ok(conn) = self.lock_conn() {
+                let resolved: Result<Option<String>, _> = conn.query_row(
+                    "SELECT address FROM agents 
+                     WHERE (runtime LIKE ?1 OR address LIKE ?2) AND status = 'online'
+                     ORDER BY last_seen_at DESC LIMIT 1",
+                    params![format!("%{rt_prefix}%"), addr_like],
+                    |r| r.get(0),
+                );
+                if let Ok(Some(addr)) = resolved {
+                    return addr;
+                }
+                let fallback: Result<Option<String>, _> = conn.query_row(
+                    "SELECT address FROM agents 
+                     WHERE (runtime LIKE ?1 OR address LIKE ?2)
+                     ORDER BY last_seen_at DESC LIMIT 1",
+                    params![format!("%{rt_prefix}%"), addr_like],
+                    |r| r.get(0),
+                );
+                if let Ok(Some(addr)) = fallback {
+                    return addr;
+                }
             }
         }
 
-        target.to_string()
+        target.trim().trim_start_matches('@').to_string()
     }
 
     pub fn get_agent(&self, address: &str) -> Result<Option<Agent>> {
@@ -363,7 +376,7 @@ impl Database {
     }
 
     pub fn list_agents(&self) -> Result<Vec<Agent>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT address, runtime, session_id, cwd, status, transport,
                     endpoint, auth_token, allow_wake_resume, last_seen_at, registered_at
@@ -396,7 +409,7 @@ impl Database {
 
         let title = format!("{} <-> {}", pair[0], pair[1]);
         {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn()?;
             conn.execute(
                 "INSERT OR IGNORE INTO threads (
                     id, kind, title, description, created_by, created_at, updated_at,
@@ -436,7 +449,7 @@ impl Database {
         let now = Utc::now().to_rfc3339();
 
         {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn()?;
             conn.execute(
                 "INSERT INTO threads (
                     id, kind, title, description, created_by, created_at, updated_at,
@@ -465,7 +478,7 @@ impl Database {
     }
 
     pub fn get_thread(&self, thread_id: &str) -> Result<Option<Thread>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.query_row(
             "SELECT t.id, t.kind, t.title, t.description, t.created_by, t.created_at,
                     t.updated_at, t.hop_count, t.max_hops, t.muted,
@@ -479,7 +492,7 @@ impl Database {
     }
 
     pub fn list_threads(&self) -> Result<Vec<Thread>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT t.id, t.kind, t.title, t.description, t.created_by, t.created_at,
                     t.updated_at, t.hop_count, t.max_hops, t.muted,
@@ -496,7 +509,7 @@ impl Database {
 
     pub fn set_thread_muted(&self, thread_id: &str, muted: bool) -> Result<Option<Thread>> {
         {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn()?;
             let rows = conn.execute(
                 "UPDATE threads SET muted = ?1 WHERE id = ?2",
                 params![if muted { 1 } else { 0 }, thread_id],
@@ -510,7 +523,7 @@ impl Database {
 
     pub fn reset_thread_hops(&self, thread_id: &str) -> Result<Option<Thread>> {
         {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn()?;
             let rows = conn.execute(
                 "UPDATE threads SET hop_count = 0 WHERE id = ?1",
                 params![thread_id],
@@ -529,7 +542,7 @@ impl Database {
         mode: SubscriptionMode,
     ) -> Result<Subscription> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO subscriptions (thread_id, agent_address, mode, last_read_seq, updated_at)
              VALUES (?1, ?2, ?3, 0, ?4)
@@ -548,7 +561,7 @@ impl Database {
     }
 
     pub fn remove_subscription(&self, thread_id: &str, agent_address: &str) -> Result<bool> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let rows = conn.execute(
             "DELETE FROM subscriptions WHERE thread_id = ?1 AND agent_address = ?2",
             params![thread_id, agent_address],
@@ -557,7 +570,7 @@ impl Database {
     }
 
     pub fn list_subscriptions(&self, thread_id: Option<&str>) -> Result<Vec<Subscription>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut out = Vec::new();
         if let Some(tid) = thread_id {
             let mut stmt = conn.prepare(
@@ -593,13 +606,17 @@ impl Database {
         let id = Uuid::new_v4().to_string();
 
         // Merge explicit mentions with inline @address mentions parsed from body
-        let mut mentions: Vec<String> = explicit_mentions.to_vec();
+        let mut mentions: Vec<String> = explicit_mentions
+            .iter()
+            .map(|m| m.trim().trim_start_matches('@').to_string())
+            .filter(|m| !m.is_empty())
+            .collect();
         for token in body.split_whitespace() {
             if let Some(rest) = token.strip_prefix('@') {
                 let clean = rest
                     .trim_end_matches(|c: char| matches!(c, ',' | '.' | ':' | ';' | '!' | '?' | ')'))
                     .to_string();
-                if !clean.is_empty() && !mentions.iter().any(|m| m == &clean) {
+                if !clean.is_empty() && !mentions.iter().any(|m| m.eq_ignore_ascii_case(&clean)) {
                     mentions.push(clean);
                 }
             }
@@ -607,7 +624,7 @@ impl Database {
         let mentions_json = serde_json::to_string(&mentions)?;
 
         let seq: i64 = {
-            let conn = self.conn.lock().unwrap();
+            let conn = self.lock_conn()?;
             let next_seq: i64 = conn.query_row(
                 "SELECT COALESCE(MAX(seq), 0) + 1 FROM messages WHERE thread_id = ?1",
                 params![thread_id],
@@ -642,6 +659,52 @@ impl Database {
                 )?;
             }
 
+            // Auto-subscribe any @mentioned registered agents who are not yet subscribed to this
+            // thread so their unread inbox & hook reminders never miss a mention.
+            if !mentions.is_empty() {
+                let mut stmt = conn.prepare("SELECT address, status FROM agents")?;
+                let registered: Vec<(String, String)> = stmt
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<std::result::Result<_, _>>()?;
+                drop(stmt);
+
+                let mut to_subscribe: HashSet<String> = HashSet::new();
+                for mention in &mentions {
+                    if mention.eq_ignore_ascii_case("all")
+                        || mention.eq_ignore_ascii_case("everyone")
+                    {
+                        for (addr, status) in &registered {
+                            if addr != sender && status != "offline" {
+                                to_subscribe.insert(addr.clone());
+                            }
+                        }
+                    } else {
+                        let mut matched_any = false;
+                        for (addr, _) in &registered {
+                            if addr != sender && mention_matches_agent(mention, addr) {
+                                to_subscribe.insert(addr.clone());
+                                matched_any = true;
+                            }
+                        }
+                        // Allow mentioning an explicit canonical address even before first registration
+                        if !matched_any && mention.contains(':') && mention != sender {
+                            to_subscribe.insert(mention.clone());
+                        }
+                    }
+                }
+
+                // Set last_read_seq = next_seq - 1 so only this mention (and later messages) are unread
+                let initial_read_seq = next_seq.saturating_sub(1);
+                for addr in to_subscribe {
+                    conn.execute(
+                        "INSERT OR IGNORE INTO subscriptions (
+                            thread_id, agent_address, mode, last_read_seq, updated_at
+                         ) VALUES (?1, ?2, 'mentions', ?3, ?4)",
+                        params![thread_id, &addr, initial_read_seq, &now],
+                    )?;
+                }
+            }
+
             // Advance sender's own read cursor so they never see their own message as unread
             conn.execute(
                 "UPDATE subscriptions SET last_read_seq = MAX(last_read_seq, ?1), updated_at = ?2
@@ -670,7 +733,7 @@ impl Database {
     }
 
     pub fn read_messages(&self, thread_id: &str, since_seq: i64, limit: i64) -> Result<Vec<Message>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, thread_id, seq, sender, body, mentions_json, ack_only, created_at
              FROM messages
@@ -686,24 +749,65 @@ impl Database {
         Ok(out)
     }
 
+    /// Reads messages in a thread and, when `reader` is provided with `auto_ack = true`,
+    /// automatically advances the reader's `last_read_seq` to the latest returned message.
+    pub fn read_messages_for_agent(
+        &self,
+        thread_id: &str,
+        since_seq: i64,
+        limit: i64,
+        reader: Option<&str>,
+        auto_ack: bool,
+    ) -> Result<Vec<Message>> {
+        let msgs = self.read_messages(thread_id, since_seq, limit)?;
+        if auto_ack {
+            if let (Some(addr), Some(last)) = (reader, msgs.last()) {
+                self.ack_inbox(addr, thread_id, last.seq)?;
+            }
+        }
+        Ok(msgs)
+    }
+
     pub fn ack_inbox(&self, agent_address: &str, thread_id: &str, up_to_seq: i64) -> Result<()> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
-            "UPDATE subscriptions
-             SET last_read_seq = MAX(last_read_seq, ?1), updated_at = ?2
-             WHERE thread_id = ?3 AND agent_address = ?4",
-            params![up_to_seq, &now, thread_id, agent_address],
+            "INSERT INTO subscriptions (thread_id, agent_address, mode, last_read_seq, updated_at)
+             VALUES (?1, ?2, 'mentions', ?3, ?4)
+             ON CONFLICT(thread_id, agent_address) DO UPDATE SET
+                last_read_seq = MAX(subscriptions.last_read_seq, excluded.last_read_seq),
+                updated_at = excluded.updated_at",
+            params![thread_id, agent_address, up_to_seq, &now],
         )?;
         Ok(())
     }
 
+    /// Marks every subscribed thread for `agent_address` as read up to its latest message seq.
+    pub fn ack_all_inbox(&self, agent_address: &str) -> Result<usize> {
+        let now = Utc::now().to_rfc3339();
+        let conn = self.lock_conn()?;
+        let updated = conn.execute(
+            "UPDATE subscriptions
+             SET last_read_seq = MAX(
+                    last_read_seq,
+                    COALESCE((SELECT MAX(m.seq) FROM messages m WHERE m.thread_id = subscriptions.thread_id), 0)
+                 ),
+                 updated_at = ?1
+             WHERE agent_address = ?2",
+            params![&now, agent_address],
+        )?;
+        Ok(updated)
+    }
+
+    /// Returns unread inbox items for `agent_address`, respecting subscription modes:
+    /// - DMs and `all`/`digest` forum subscriptions count all messages after `last_read_seq`.
+    /// - `mentions`-mode forum subscriptions count ONLY messages that actually `@mention` this agent.
+    /// - Muted threads and muted subscriptions are excluded.
     pub fn check_inbox(&self, agent_address: &str) -> Result<Vec<InboxItem>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT t.id, t.title, t.kind,
-                    COUNT(m.id) AS unread_count,
-                    MAX(m.seq) AS latest_seq
+            "SELECT t.id, t.title, t.kind, s.mode,
+                    m.seq, m.sender, m.body, m.mentions_json, m.created_at
              FROM subscriptions s
              JOIN threads t ON t.id = s.thread_id
              JOIN messages m ON m.thread_id = t.id
@@ -711,36 +815,91 @@ impl Database {
                AND m.seq > s.last_read_seq
                AND m.sender != ?1
                AND s.mode != 'muted'
-             GROUP BY t.id, t.title, t.kind
-             ORDER BY MAX(m.created_at) DESC",
+               AND t.muted = 0
+             ORDER BY t.id ASC, m.seq ASC",
         )?;
 
-        let base_rows: Vec<(String, String, String, i64, i64)> = stmt
-            .query_map(params![agent_address], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-            })?
-            .collect::<std::result::Result<_, _>>()?;
+        struct Acc {
+            thread_id: String,
+            thread_title: String,
+            thread_kind: ThreadKind,
+            unread_count: i64,
+            mentioned_count: i64,
+            latest_seq: i64,
+            latest_sender: String,
+            latest_preview: String,
+            latest_at: String,
+        }
 
-        let mut items = Vec::new();
-        for (tid, title, kind_s, unread_count, latest_seq) in base_rows {
-            let (latest_sender, latest_body, latest_at): (String, String, String) = conn.query_row(
-                "SELECT sender, body, created_at FROM messages
-                 WHERE thread_id = ?1 AND seq = ?2",
-                params![&tid, latest_seq],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )?;
-            let preview: String = latest_body.chars().take(120).collect();
-            items.push(InboxItem {
+        let mut grouped: BTreeMap<String, Acc> = BTreeMap::new();
+        let rows = stmt.query_map(params![agent_address], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, i64>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, String>(8)?,
+            ))
+        })?;
+
+        for row in rows {
+            let (tid, title, kind_s, mode_s, seq, sender, body, mentions_json, created_at) = row?;
+            let kind = ThreadKind::from_str(&kind_s);
+            let mode = SubscriptionMode::from_str(&mode_s);
+            let mentions: Vec<String> = serde_json::from_str(&mentions_json).unwrap_or_default();
+            let is_mentioned = mentions
+                .iter()
+                .any(|m| mention_matches_agent(m, agent_address));
+
+            if kind == ThreadKind::Forum && mode == SubscriptionMode::Mentions && !is_mentioned {
+                continue;
+            }
+
+            let preview: String = body.chars().take(120).collect();
+            let entry = grouped.entry(tid.clone()).or_insert_with(|| Acc {
                 thread_id: tid,
                 thread_title: title,
-                thread_kind: ThreadKind::from_str(&kind_s),
-                unread_count,
-                latest_seq,
-                latest_sender,
-                latest_preview: preview,
-                latest_at,
+                thread_kind: kind,
+                unread_count: 0,
+                mentioned_count: 0,
+                latest_seq: seq,
+                latest_sender: sender.clone(),
+                latest_preview: preview.clone(),
+                latest_at: created_at.clone(),
             });
+
+            entry.unread_count += 1;
+            if is_mentioned {
+                entry.mentioned_count += 1;
+            }
+            if seq >= entry.latest_seq {
+                entry.latest_seq = seq;
+                entry.latest_sender = sender;
+                entry.latest_preview = preview;
+                entry.latest_at = created_at;
+            }
         }
+
+        let mut items: Vec<InboxItem> = grouped
+            .into_values()
+            .map(|a| InboxItem {
+                thread_id: a.thread_id,
+                thread_title: a.thread_title,
+                thread_kind: a.thread_kind,
+                unread_count: a.unread_count,
+                mentioned_count: a.mentioned_count,
+                latest_seq: a.latest_seq,
+                latest_sender: a.latest_sender,
+                latest_preview: a.latest_preview,
+                latest_at: a.latest_at,
+            })
+            .collect();
+
+        items.sort_by(|a, b| b.latest_at.cmp(&a.latest_at));
         Ok(items)
     }
 
@@ -754,7 +913,7 @@ impl Database {
         detail: Option<&str>,
     ) -> Result<DeliveryRecord> {
         let now = Utc::now().to_rfc3339();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO deliveries (message_id, thread_id, target_agent, tier, status, detail, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -774,7 +933,7 @@ impl Database {
     }
 
     pub fn recent_deliveries(&self, limit: i64) -> Result<Vec<DeliveryRecord>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, message_id, thread_id, target_agent, tier, status, detail, created_at
              FROM deliveries ORDER BY id DESC LIMIT ?1",
@@ -822,44 +981,6 @@ impl Database {
             total_messages,
         })
     }
-}
-
-fn infer_transport(runtime: &RuntimeKind, endpoint: Option<&str>) -> TransportKind {
-    match runtime {
-        RuntimeKind::ClaudeCode | RuntimeKind::ClaudeDesktop => {
-            if endpoint.is_some() {
-                TransportKind::ClaudePipe
-            } else {
-                TransportKind::PollOnly
-            }
-        }
-        RuntimeKind::Codex => {
-            if endpoint.map(|e| e.starts_with("ws://")).unwrap_or(false) {
-                TransportKind::CodexAppServer
-            } else {
-                TransportKind::CodexResume
-            }
-        }
-        RuntimeKind::Antigravity => TransportKind::AgyResume,
-        RuntimeKind::Unknown => TransportKind::PollOnly,
-    }
-}
-
-fn sanitize_slug(input: &str) -> String {
-    input
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 fn row_to_agent(r: &rusqlite::Row<'_>) -> rusqlite::Result<Agent> {
