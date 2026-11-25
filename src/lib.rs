@@ -1,3 +1,4 @@
+pub mod claude_desktop;
 pub mod codex_launcher;
 pub mod config;
 pub mod daemon;

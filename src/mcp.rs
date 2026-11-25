@@ -18,11 +18,24 @@ pub async fn run_mcp_stdio(
     let client = cfg.http_client(Duration::from_secs(10))?;
     ensure_daemon_running(&cfg, &client).await?;
 
-    let cwd = std::env::current_dir()
-        .ok()
-        .map(|p| p.to_string_lossy().to_string());
-    let session_id = std::env::var("COOMMUNITY_SESSION_ID")
-        .ok()
+    let (detected_addr, detected_sess, detected_cwd) =
+        if runtime == "claude_desktop" && address_override.is_none() {
+            if let Some(id) = crate::claude_desktop::detect_active_session() {
+                (Some(id.address), id.session_id, id.cwd)
+            } else {
+                (None, None, None)
+            }
+        } else {
+            (None, None, None)
+        };
+
+    let cwd = detected_cwd.or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .map(|p| p.to_string_lossy().to_string())
+    });
+    let session_id = detected_sess
+        .or_else(|| std::env::var("COOMMUNITY_SESSION_ID").ok())
         .or_else(|| std::env::var("CLAUDE_SESSION_ID").ok())
         .or_else(|| std::env::var("CODEX_SESSION_ID").ok())
         .or_else(|| std::env::var("AGY_CONVERSATION_ID").ok())
@@ -32,8 +45,10 @@ pub async fn run_mcp_stdio(
     // Register this MCP session automatically (hook-first PollOnly transport)
     let reg = RegisterAgentRequest {
         address: address_override
+            .clone()
             .or_else(|| std::env::var("COOM_AGENT").ok())
-            .or_else(|| std::env::var("COOMMUNITY_AGENT").ok()),
+            .or_else(|| std::env::var("COOMMUNITY_AGENT").ok())
+            .or(detected_addr),
         runtime: runtime.clone(),
         session_id,
         cwd,
@@ -203,7 +218,15 @@ pub async fn run_mcp_stdio(
             })),
             "resources/read" => {
                 let uri = params.get("uri").and_then(|v| v.as_str()).unwrap_or("");
-                match handle_resource_read(&cfg, &client, &my_address, uri).await {
+                let effective_address =
+                    if runtime == "claude_desktop" && address_override.is_none() {
+                        crate::claude_desktop::detect_active_session()
+                            .map(|id| id.address)
+                            .unwrap_or_else(|| my_address.clone())
+                    } else {
+                        my_address.clone()
+                    };
+                match handle_resource_read(&cfg, &client, &effective_address, uri).await {
                     Ok(val) => Some(json!({ "jsonrpc": "2.0", "id": id, "result": val })),
                     Err(e) => Some(json!({
                         "jsonrpc": "2.0",
@@ -222,8 +245,33 @@ pub async fn run_mcp_stdio(
             "tools/call" => {
                 let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+                let effective_address =
+                    if runtime == "claude_desktop" && address_override.is_none() {
+                        if let Some(identity) = crate::claude_desktop::detect_active_session() {
+                            let _ = client
+                                .post(format!("{}/api/agents", cfg.base_url()))
+                                .json(&RegisterAgentRequest {
+                                    address: Some(identity.address.clone()),
+                                    runtime: runtime.clone(),
+                                    session_id: identity.session_id.clone(),
+                                    cwd: identity.cwd.clone(),
+                                    status: Some("online".to_string()),
+                                    transport: Some("poll_only".to_string()),
+                                    endpoint: None,
+                                    auth_token: None,
+                                    allow_wake_resume: None,
+                                })
+                                .send()
+                                .await;
+                            identity.address
+                        } else {
+                            my_address.clone()
+                        }
+                    } else {
+                        my_address.clone()
+                    };
                 let call_result =
-                    handle_tool_call(&cfg, &client, &my_address, name, &args).await;
+                    handle_tool_call(&cfg, &client, &effective_address, name, &args).await;
                 let payload = match call_result {
                     Ok(v) => json!({
                         "content": [{ "type": "text", "text": serde_json::to_string_pretty(&v).unwrap_or_default() }],

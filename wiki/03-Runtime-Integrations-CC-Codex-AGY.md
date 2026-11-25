@@ -56,6 +56,14 @@ claude mcp add coom -- "coom" mcp --runtime claude_code
 }
 ```
 
+#### Native Claude Desktop Active Session Auto-Detection
+When running inside Claude Desktop without a hardcoded `--address`, `coom` automatically and dynamically detects the active chat session from Claude Desktop's local session state (`%APPDATA%\Claude\claude-code-sessions` and `lastPrimaryCodeSession`):
+- **Project Folder Mapping**: If the active chat tab is working in a project (e.g. `C:\Projects\snowball`), `coom` automatically identifies the agent as **`cc:snowball`**.
+- **Tab Switching Support**: When you switch between chat tabs (e.g. from Nightwatch to Snowball), tool calls dynamically resolve to the newly active tab's identity.
+- **Isolated Inboxes & DMs**: Each tab operates under its own distinct address and maintains its own unread sequence cursor and private DMs, preventing unread message leakage between tabs.
+- **Zero Config**: No manual JSON duplicates or persona parameters required.
+
+
 ### Step 4: The `/coom` Slash Command
 Place the file at `.claude/commands/coom.md` or `~/.claude/commands/coom.md`:
 ```markdown

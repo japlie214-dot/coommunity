@@ -135,3 +135,93 @@ fn test_wait_for_message_tool_definition() {
         .expect("ack_all_inbox tool must be defined");
     assert!(ack_all_tool.get("description").is_some());
 }
+
+#[test]
+fn test_claude_desktop_identity_derivation_precedence() {
+    use coommunity::claude_desktop::{derive_identity_from_session, ClaudeDesktopSessionInfo};
+
+    // Case 1: Session with explicit CWD
+    let sess_with_cwd = ClaudeDesktopSessionInfo {
+        session_id: "local_12345678-abcd".to_string(),
+        cwd: Some("C:\\Projects\\etoroNightwatch".to_string()),
+        title: Some("NIGHTWATCH".to_string()),
+    };
+    let (addr, cwd) = derive_identity_from_session(&sess_with_cwd);
+    assert_eq!(addr, "cc:etoronightwatch");
+    assert_eq!(cwd, Some("C:\\Projects\\etoroNightwatch".to_string()));
+
+    // Case 2: Session without CWD, but with custom Title
+    let sess_with_title = ClaudeDesktopSessionInfo {
+        session_id: "local_98765432-ef01".to_string(),
+        cwd: None,
+        title: Some("Snowball Analytics".to_string()),
+    };
+    let (addr, cwd) = derive_identity_from_session(&sess_with_title);
+    assert_eq!(addr, "cc:snowball-analytics");
+    assert_eq!(cwd, None);
+
+    // Case 3: Session without CWD or Title, fallback to short session ID
+    let sess_bare = ClaudeDesktopSessionInfo {
+        session_id: "local_f531d2d3-67c8-408c".to_string(),
+        cwd: None,
+        title: None,
+    };
+    let (addr, _) = derive_identity_from_session(&sess_bare);
+    assert_eq!(addr, "cc:desktop:local-f5");
+
+    // Case 4: Completely empty session
+    let sess_empty = ClaudeDesktopSessionInfo {
+        session_id: "".to_string(),
+        cwd: None,
+        title: None,
+    };
+    let (addr, _) = derive_identity_from_session(&sess_empty);
+    assert_eq!(addr, "cc:desktop");
+}
+
+#[test]
+fn test_claude_desktop_active_session_file_scanning() {
+    use coommunity::claude_desktop::detect_active_session_in;
+    use std::fs;
+
+    let temp_root = std::env::temp_dir().join(format!("claude_test_{}", uuid::Uuid::new_v4()));
+    let sessions_dir = temp_root.join("claude-code-sessions").join("acc1").join("dev1");
+    fs::create_dir_all(&sessions_dir).unwrap();
+
+    // Create session A (older)
+    let sess_a_path = sessions_dir.join("local_session_a.json");
+    fs::write(
+        &sess_a_path,
+        r#"{"sessionId": "local_session_a", "cwd": "C:\\Projects\\memberBerries", "title": "MEMBERBERRIES"}"#,
+    ).unwrap();
+
+    // Small delay to ensure timestamp difference
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Create session B (newer)
+    let sess_b_path = sessions_dir.join("local_session_b.json");
+    fs::write(
+        &sess_b_path,
+        r#"{"sessionId": "local_session_b", "cwd": "C:\\Projects\\snowball", "title": "SNOWBALL"}"#,
+    ).unwrap();
+
+    // detect_active_session_in should pick the newest (session B -> cc:snowball)
+    let detected = detect_active_session_in(&temp_root).expect("should detect active session");
+    assert_eq!(detected.address, "cc:snowball");
+    assert_eq!(detected.cwd, Some("C:\\Projects\\snowball".to_string()));
+    assert_eq!(detected.session_id, Some("local_session_b".to_string()));
+
+    // Now touch session A with a newer write
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    fs::write(
+        &sess_a_path,
+        r#"{"sessionId": "local_session_a", "cwd": "C:\\Projects\\memberBerries", "title": "MEMBERBERRIES"}"#,
+    ).unwrap();
+
+    // Now detect_active_session_in should switch to session A -> cc:memberberries
+    let detected2 = detect_active_session_in(&temp_root).expect("should detect switched session");
+    assert_eq!(detected2.address, "cc:memberberries");
+    assert_eq!(detected2.cwd, Some("C:\\Projects\\memberBerries".to_string()));
+
+    let _ = fs::remove_dir_all(&temp_root);
+}
