@@ -431,6 +431,60 @@ impl Database {
             .context("dm thread missing after create")
     }
 
+    /// Verifies if a given agent address is an authorized participant in a DM thread.
+    pub fn is_dm_participant(&self, thread_id: &str, agent: &str) -> Result<bool> {
+        let clean_agent = agent.trim().trim_start_matches('@');
+        if clean_agent.is_empty() {
+            return Ok(false);
+        }
+
+        // Fast path: check thread ID slug components (dm:<sanitized_a>:<sanitized_b>)
+        if let Some(rest) = thread_id.strip_prefix("dm:") {
+            let parts: Vec<&str> = rest.split(':').collect();
+            if parts.len() == 2 {
+                let sanitized_caller = sanitize_slug(clean_agent);
+                if parts[0].eq_ignore_ascii_case(&sanitized_caller)
+                    || parts[1].eq_ignore_ascii_case(&sanitized_caller)
+                {
+                    return Ok(true);
+                }
+            }
+        }
+
+        // Check active subscriptions on this thread
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT agent_address FROM subscriptions WHERE thread_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![thread_id], |r| r.get::<_, String>(0))?;
+        for r in rows {
+            let addr = r?;
+            if addr.eq_ignore_ascii_case(clean_agent)
+                || mention_matches_agent(&addr, clean_agent)
+                || mention_matches_agent(clean_agent, &addr)
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Checks if an agent is authorized to access a thread (forums: open to all; DMs: participants only).
+    pub fn can_access_thread(&self, thread_id: &str, agent: &str) -> Result<bool> {
+        let thread = self.get_thread(thread_id)?;
+        match thread {
+            None => Ok(false),
+            Some(t) => {
+                if t.kind == ThreadKind::Dm {
+                    self.is_dm_participant(thread_id, agent)
+                } else {
+                    Ok(true) // Forum threads are open to all
+                }
+            }
+        }
+    }
+
     pub fn create_forum_thread(
         &self,
         title: &str,
@@ -505,6 +559,32 @@ impl Database {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Lists threads visible to the given reader address.
+    /// Public forums are visible to everyone. Private DMs are only visible to their participants.
+    /// When reader is None, returns only public forum threads.
+    pub fn list_threads_for_agent(&self, reader: Option<&str>) -> Result<Vec<Thread>> {
+        let all = self.list_threads()?;
+        match reader.map(str::trim).filter(|r| !r.is_empty()) {
+            Some(r) => {
+                let mut visible = Vec::new();
+                for t in all {
+                    if t.kind == ThreadKind::Dm {
+                        if self.is_dm_participant(&t.id, r)? {
+                            visible.push(t);
+                        }
+                    } else {
+                        visible.push(t);
+                    }
+                }
+                Ok(visible)
+            }
+            None => {
+                // Anonymous or unauthenticated: only expose public forum threads
+                Ok(all.into_iter().filter(|t| t.kind != ThreadKind::Dm).collect())
+            }
+        }
     }
 
     pub fn set_thread_muted(&self, thread_id: &str, muted: bool) -> Result<Option<Thread>> {
@@ -602,6 +682,17 @@ impl Database {
         explicit_mentions: &[String],
         ack_only: bool,
     ) -> Result<(Message, Thread)> {
+        let thread_before = self
+            .get_thread(thread_id)?
+            .context("thread not found")?;
+        if thread_before.kind == ThreadKind::Dm && !self.is_dm_participant(thread_id, sender)? {
+            anyhow::bail!(
+                "Access denied: sender '{}' is not a participant in DM thread '{}'",
+                sender,
+                thread_id
+            );
+        }
+
         let now = Utc::now().to_rfc3339();
         let id = Uuid::new_v4().to_string();
 
@@ -751,6 +842,7 @@ impl Database {
 
     /// Reads messages in a thread and, when `reader` is provided with `auto_ack = true`,
     /// automatically advances the reader's `last_read_seq` to the latest returned message.
+    /// DM threads are strictly restricted to authorized participants.
     pub fn read_messages_for_agent(
         &self,
         thread_id: &str,
@@ -759,6 +851,28 @@ impl Database {
         reader: Option<&str>,
         auto_ack: bool,
     ) -> Result<Vec<Message>> {
+        let thread = self
+            .get_thread(thread_id)?
+            .context("thread not found")?;
+        if thread.kind == ThreadKind::Dm {
+            match reader.map(str::trim).filter(|r| !r.is_empty()) {
+                Some(r) => {
+                    if !self.is_dm_participant(thread_id, r)? {
+                        anyhow::bail!(
+                            "Access denied: agent '{}' is not a participant in DM thread '{}'",
+                            r,
+                            thread_id
+                        );
+                    }
+                }
+                None => {
+                    anyhow::bail!(
+                        "Access denied: a reader agent address is required to read private DM thread '{}'",
+                        thread_id
+                    );
+                }
+            }
+        }
         let msgs = self.read_messages(thread_id, since_seq, limit)?;
         if auto_ack {
             if let (Some(addr), Some(last)) = (reader, msgs.last()) {

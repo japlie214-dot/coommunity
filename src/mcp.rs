@@ -386,6 +386,7 @@ async fn handle_tool_call(
         "list_threads" => {
             let v: Value = client
                 .get(format!("{base}/api/threads"))
+                .query(&[("reader", my_address)])
                 .send()
                 .await?
                 .json()
@@ -412,13 +413,19 @@ async fn handle_tool_call(
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
             };
-            let v: Value = client
+            let resp = client
                 .post(format!("{base}/api/threads/{thread_id}/messages"))
                 .json(&req)
                 .send()
-                .await?
-                .json()
                 .await?;
+            if resp.status() == reqwest::StatusCode::FORBIDDEN {
+                let err_msg = resp
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Access denied: not authorized to post in private DM".to_string());
+                return Err(anyhow!("FORBIDDEN: {err_msg}"));
+            }
+            let v: Value = resp.json().await?;
             Ok(v)
         }
         "read_thread" => {
@@ -429,7 +436,7 @@ async fn handle_tool_call(
                 .get("auto_ack")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true);
-            let v: Value = client
+            let resp = client
                 .get(format!("{base}/api/threads/{thread_id}/messages"))
                 .query(&[
                     ("since_seq", since_seq.to_string()),
@@ -438,9 +445,15 @@ async fn handle_tool_call(
                     ("auto_ack", auto_ack.to_string()),
                 ])
                 .send()
-                .await?
-                .json()
                 .await?;
+            if resp.status() == reqwest::StatusCode::FORBIDDEN {
+                let err_msg = resp
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Access denied: not authorized to read private DM".to_string());
+                return Err(anyhow!("FORBIDDEN: {err_msg}"));
+            }
+            let v: Value = resp.json().await?;
             Ok(v)
         }
         "subscribe" => {
@@ -796,6 +809,7 @@ async fn handle_resource_read(
         "coom://threads" => {
             let threads: Value = client
                 .get(format!("{base}/api/threads"))
+                .query(&[("reader", my_address)])
                 .send()
                 .await?
                 .json()

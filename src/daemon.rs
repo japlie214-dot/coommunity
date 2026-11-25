@@ -27,6 +27,7 @@ use crate::dispatcher::Dispatcher;
 use crate::models::{
     AckInboxRequest, AgentStatus, CreateThreadRequest, HubEvent, PostMessageRequest,
     RegisterAgentRequest, SendDmRequest, SnapshotResponse, SubscribeRequest, SubscriptionMode,
+    ThreadKind,
 };
 use crate::web_ui;
 
@@ -204,7 +205,7 @@ async fn snapshot(State(st): State<AppState>) -> impl IntoResponse {
         Ok(SnapshotResponse {
             status: db.hub_status()?,
             agents: db.list_agents()?,
-            threads: db.list_threads()?,
+            threads: db.list_threads_for_agent(None)?,
             subscriptions: db.list_subscriptions(None)?,
             recent_deliveries: db.recent_deliveries(40)?,
         })
@@ -315,8 +316,20 @@ async fn ack_all_inbox(
     }
 }
 
-async fn list_threads(State(st): State<AppState>) -> impl IntoResponse {
-    match run_db(st.db.clone(), |db| db.list_threads()).await {
+#[derive(Deserialize)]
+struct ListThreadsQuery {
+    reader: Option<String>,
+}
+
+async fn list_threads(
+    State(st): State<AppState>,
+    Query(q): Query<ListThreadsQuery>,
+) -> impl IntoResponse {
+    match run_db(st.db.clone(), move |db| {
+        db.list_threads_for_agent(q.reader.as_deref())
+    })
+    .await
+    {
         Ok(threads) => (StatusCode::OK, Json(threads)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -371,12 +384,50 @@ async fn read_messages(
     let limit = q.limit.unwrap_or(100);
     let reader = q.reader;
     let auto_ack = q.auto_ack.unwrap_or(true);
-    match run_db(st.db.clone(), move |db| {
-        db.read_messages_for_agent(&id, since_seq, limit, reader.as_deref(), auto_ack)
+
+    let auth_check = run_db(st.db.clone(), {
+        let thread_id = id.clone();
+        let reader = reader.clone();
+        move |db| {
+            let thread = db.get_thread(&thread_id)?;
+            match thread {
+                None => Ok(None),
+                Some(t) => {
+                    if t.kind == ThreadKind::Dm {
+                        match reader.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                            Some(r) => Ok(Some(db.is_dm_participant(&thread_id, r)?)),
+                            None => Ok(Some(false)),
+                        }
+                    } else {
+                        Ok(Some(true))
+                    }
+                }
+            }
+        }
     })
-    .await
-    {
-        Ok(msgs) => (StatusCode::OK, Json(msgs)).into_response(),
+    .await;
+
+    match auth_check {
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("Thread '{}' not found", id)})),
+        )
+            .into_response(),
+        Ok(Some(false)) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": format!("Access denied: agent '{:?}' is not authorized to read private DM thread '{}'", reader, id)})),
+        )
+            .into_response(),
+        Ok(Some(true)) => {
+            match run_db(st.db.clone(), move |db| {
+                db.read_messages_for_agent(&id, since_seq, limit, reader.as_deref(), auto_ack)
+            })
+            .await
+            {
+                Ok(msgs) => (StatusCode::OK, Json(msgs)).into_response(),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
@@ -386,18 +437,52 @@ async fn post_message(
     Path(id): Path<String>,
     Json(req): Json<PostMessageRequest>,
 ) -> impl IntoResponse {
-    match run_db(st.db.clone(), move |db| {
-        db.post_message(&id, &req.sender, &req.body, &req.mentions, req.ack_only)
+    let auth_check = run_db(st.db.clone(), {
+        let thread_id = id.clone();
+        let sender = req.sender.clone();
+        move |db| {
+            let thread = db.get_thread(&thread_id)?;
+            match thread {
+                None => Ok(None),
+                Some(t) => {
+                    if t.kind == ThreadKind::Dm {
+                        Ok(Some(db.is_dm_participant(&thread_id, &sender)?))
+                    } else {
+                        Ok(Some(true))
+                    }
+                }
+            }
+        }
     })
-    .await
-    {
-        Ok((message, thread)) => {
-            let _ = st.events.send(HubEvent::MessagePosted {
-                message: message.clone(),
-                thread: thread.clone(),
-            });
-            st.dispatcher.dispatch_message(thread, message.clone());
-            (StatusCode::CREATED, Json(message)).into_response()
+    .await;
+
+    match auth_check {
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": format!("Thread '{}' not found", id)})),
+        )
+            .into_response(),
+        Ok(Some(false)) => (
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": format!("Access denied: sender '{}' is not a participant in DM thread '{}'", req.sender, id)})),
+        )
+            .into_response(),
+        Ok(Some(true)) => {
+            match run_db(st.db.clone(), move |db| {
+                db.post_message(&id, &req.sender, &req.body, &req.mentions, req.ack_only)
+            })
+            .await
+            {
+                Ok((message, thread)) => {
+                    let _ = st.events.send(HubEvent::MessagePosted {
+                        message: message.clone(),
+                        thread: thread.clone(),
+                    });
+                    st.dispatcher.dispatch_message(thread, message.clone());
+                    (StatusCode::CREATED, Json(message)).into_response()
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
@@ -448,16 +533,46 @@ async fn subscribe(
     Json(req): Json<SubscribeRequest>,
 ) -> impl IntoResponse {
     let mode = SubscriptionMode::from_str(&req.mode);
-    match run_db(st.db.clone(), move |db| {
-        db.upsert_subscription(&id, &req.agent_address, mode)
+    let auth_check = run_db(st.db.clone(), {
+        let thread_id = id.clone();
+        let agent = req.agent_address.clone();
+        move |db| {
+            let thread = db.get_thread(&thread_id)?;
+            match thread {
+                None => Ok(None),
+                Some(t) => {
+                    if t.kind == ThreadKind::Dm {
+                        Ok(Some(db.is_dm_participant(&thread_id, &agent)?))
+                    } else {
+                        Ok(Some(true))
+                    }
+                }
+            }
+        }
     })
-    .await
-    {
-        Ok(sub) => {
-            let _ = st.events.send(HubEvent::SubscriptionUpdated {
-                subscription: sub.clone(),
-            });
-            (StatusCode::OK, Json(sub)).into_response()
+    .await;
+
+    match auth_check {
+        Ok(None) => (StatusCode::NOT_FOUND, "Thread not found").into_response(),
+        Ok(Some(false)) => (
+            StatusCode::FORBIDDEN,
+            "Access denied: cannot subscribe to private DM thread",
+        )
+            .into_response(),
+        Ok(Some(true)) => {
+            match run_db(st.db.clone(), move |db| {
+                db.upsert_subscription(&id, &req.agent_address, mode)
+            })
+            .await
+            {
+                Ok(sub) => {
+                    let _ = st.events.send(HubEvent::SubscriptionUpdated {
+                        subscription: sub.clone(),
+                    });
+                    (StatusCode::OK, Json(sub)).into_response()
+                }
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
