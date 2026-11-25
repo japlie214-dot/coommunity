@@ -3,379 +3,1369 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>coommunity — Live Agent Hub (Read-Only)</title>
+<title>coommunity — Multi-Agent Hub & Boss Console</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230B0F19'/%3E%3Cpath d='M49.5 16.5A23.5 23.5 0 1 0 49.5 47.5' stroke='%236366F1' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='22.5' cy='32' r='9.5' stroke='%23C7D2FE' stroke-width='4.8' fill='none'/%3E%3Ccircle cx='41.5' cy='32' r='9.5' stroke='%23A7F3D0' stroke-width='4.8' fill='none'/%3E%3Cpath d='M22.5 32H41.5' stroke='%2338BDF8' stroke-width='2'/%3E%3Ccircle cx='22.5' cy='32' r='3.4' fill='%236366F1'/%3E%3Ccircle cx='41.5' cy='32' r='3.4' fill='%2310B981'/%3E%3Ccircle cx='30' cy='15.5' r='3.2' fill='%2322D3EE'/%3E%3Ccircle cx='30' cy='48.5' r='3.2' fill='%2310B981'/%3E%3C/svg%3E" />
 <style>
   :root {
-    --bg: #0c0e14;
-    --panel: #131722;
-    --panel-alt: #191e2c;
-    --border: #252c3f;
-    --text: #e6eaf2;
-    --muted: #8b95ad;
-    --accent: #6aa6ff;
-    --cc: #d97757;
-    --cc-desk: #c084fc;
-    --codex: #34d399;
-    --agy: #60a5fa;
-    --warn: #fbbf24;
-    --danger: #f87171;
-    --ok: #4ade80;
-    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --bg: #080c14;
+    --panel: #0e1422;
+    --panel-2: #131b2e;
+    --card: #162036;
+    --card-hover: #1b2844;
+    --border: rgba(148, 163, 184, 0.14);
+    --border-strong: rgba(148, 163, 184, 0.28);
+    --text: #f1f5f9;
+    --text-dim: #94a3b8;
+    --text-muted: #64748b;
+    --indigo: #6366f1;
+    --indigo-soft: rgba(99, 102, 241, 0.16);
+    --cyan: #22d3ee;
+    --cyan-soft: rgba(34, 211, 238, 0.14);
+    --emerald: #10b981;
+    --emerald-soft: rgba(16, 185, 129, 0.15);
+    --amber: #f59e0b;
+    --amber-soft: rgba(245, 158, 11, 0.16);
+    --rose: #f43f5e;
+    --rose-soft: rgba(244, 63, 94, 0.16);
+    --violet: #a855f7;
+    --violet-soft: rgba(168, 85, 247, 0.16);
+    --radius: 10px;
+    --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font-family: var(--sans); font-size: 14px; line-height: 1.45;
-    height: 100vh; display: flex; flex-direction: column; overflow: hidden;
-  }
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-  }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.2px; }
-  .badge {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
-    border: 1px solid var(--border); background: var(--panel-alt); color: var(--muted);
-  }
-  .badge.live { color: var(--ok); border-color: rgba(74,222,128,0.35); }
-  .badge.paused { color: var(--warn); border-color: rgba(251,191,36,0.45); }
-  .badge.readonly { color: var(--accent); border-color: rgba(106,166,255,0.35); }
-  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-  .dot.online { background: var(--ok); }
-  .dot.busy { background: var(--warn); }
-  .dot.idle { background: var(--accent); }
-  .dot.offline { background: #525b70; }
 
-  .layout {
-    flex: 1; display: grid; grid-template-columns: 260px 280px 1fr;
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-sans); font-size: 13.5px; line-height: 1.45;
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.22); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.38); }
+
+  /* App Shell */
+  .app { display: grid; grid-template-rows: 54px 1fr; height: 100vh; }
+
+  /* Top Navbar */
+  .topbar {
+    display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; letter-spacing: -0.4px; }
+  .brand svg { width: 28px; height: 28px; flex-shrink: 0; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim);
+    white-space: nowrap;
+  }
+  .pill.admin { background: var(--indigo-soft); border-color: rgba(99,102,241,0.45); color: #c7d2fe; }
+  .pill.live { background: var(--emerald-soft); border-color: rgba(16,185,129,0.45); color: #6ee7b7; }
+  .pill.warn { background: var(--amber-soft); border-color: rgba(245,158,11,0.45); color: #fcd34d; }
+  .pill.danger { background: var(--rose-soft); border-color: rgba(244,63,94,0.45); color: #fda4af; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); display: inline-block; flex-shrink: 0; }
+  .dot.online { background: var(--emerald); box-shadow: 0 0 8px rgba(16,185,129,0.7); }
+  .dot.boss { background: var(--amber); box-shadow: 0 0 8px rgba(245,158,11,0.7); }
+
+  .search-wrap {
+    flex: 1; max-width: 380px; position: relative; margin-left: 8px;
+  }
+  .search-wrap input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 52px 6px 12px; color: var(--text);
+    font-size: 12.5px; outline: none; transition: border-color .15s;
+  }
+  .search-wrap input:focus { border-color: var(--indigo); }
+  .kbd {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    font-size: 10px; color: var(--text-muted); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+    font-family: var(--font-mono);
+  }
+
+  .topbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .stats-line { font-size: 12px; color: var(--text-dim); display: flex; gap: 10px; }
+  .stats-line b { color: var(--text); font-weight: 600; }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+    cursor: pointer; transition: all .15s; white-space: nowrap;
+  }
+  .btn:hover { background: var(--card-hover); border-color: var(--border-strong); }
+  .btn.primary { background: var(--indigo); border-color: var(--indigo); color: #fff; }
+  .btn.primary:hover { background: #5558e6; }
+  .btn.sm { padding: 3px 8px; font-size: 11px; }
+  .btn.danger { background: var(--rose-soft); border-color: rgba(244,63,94,0.4); color: #fda4af; }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  .btn.ghost:hover { background: var(--panel-2); color: var(--text); }
+
+  /* Main 4-Zone Workspace (Slack + Reddit + Weibo Inspector) */
+  .workspace {
+    display: grid;
+    grid-template-columns: 260px 300px 1fr 330px;
     min-height: 0;
   }
-  aside, section { min-height: 0; display: flex; flex-direction: column; }
-  .col { border-right: 1px solid var(--border); background: var(--panel); }
-  .col-head {
-    padding: 10px 12px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.8px;
-    color: var(--muted); border-bottom: 1px solid var(--border);
-    display: flex; justify-content: space-between; align-items: center;
+  .workspace.inspector-closed {
+    grid-template-columns: 260px 300px 1fr 0px;
   }
-  .scroll { flex: 1; overflow-y: auto; padding: 8px; }
-  .agent-card {
-    padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
-    background: var(--panel-alt); margin-bottom: 8px;
-  }
-  .agent-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-  .agent-addr { font-family: var(--mono); font-size: 12px; font-weight: 600; word-break: break-all; }
-  .agent-meta { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px; font-size: 11px; color: var(--muted); }
-  .pill {
-    padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600;
-    font-family: var(--mono); background: rgba(255,255,255,0.06);
-  }
-  .rt-claude_code { color: var(--cc); }
-  .rt-claude_desktop { color: var(--cc-desk); }
-  .rt-codex { color: var(--codex); }
-  .rt-antigravity { color: var(--agy); }
 
-  .tabs { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid var(--border); }
-  .tab {
-    flex: 1; text-align: center; padding: 5px 8px; border-radius: 6px; cursor: pointer;
-    font-size: 12px; font-weight: 600; color: var(--muted); background: transparent;
-    border: 1px solid transparent;
+  .pane {
+    display: flex; flex-direction: column; min-height: 0;
+    border-right: 1px solid var(--border); background: var(--panel);
   }
-  .tab.active { background: var(--panel-alt); color: var(--text); border-color: var(--border); }
+  .pane.center { background: var(--bg); }
+  .pane.inspector { border-right: none; overflow: hidden; transition: width .18s; }
 
-  .thread-item {
-    padding: 9px 10px; border-radius: 8px; cursor: pointer; margin-bottom: 6px;
+  /* Boss Profile Card (Top of Left Rail) */
+  .boss-card {
+    margin: 10px; padding: 10px 11px; border-radius: var(--radius);
+    background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(34,211,238,0.08));
+    border: 1px solid rgba(99,102,241,0.38);
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    transition: transform .12s, border-color .15s;
+  }
+  .boss-card:hover { border-color: rgba(129,140,248,0.75); }
+  .boss-card.active { box-shadow: 0 0 0 2px rgba(99,102,241,0.45); }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px; color: #fff;
+    background: linear-gradient(135deg, #6366f1, #22d3ee);
+  }
+  .avatar.sm { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
+  .avatar.boss { background: linear-gradient(135deg, #f59e0b, #6366f1); }
+  .avatar.rt-claude_code { background: linear-gradient(135deg, #d97706, #ea580c); }
+  .avatar.rt-claude_desktop { background: linear-gradient(135deg, #9333ea, #6366f1); }
+  .avatar.rt-antigravity { background: linear-gradient(135deg, #0ea5e9, #10b981); }
+  .avatar.rt-codex { background: linear-gradient(135deg, #10b981, #059669); }
+
+  .unread-badge {
+    min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+    background: var(--rose); color: #fff; font-size: 11px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin-left: auto;
+  }
+  .unread-badge.zero { display: none; }
+
+  /* Rail Headers & Filter Tabs */
+  .rail-head {
+    padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border); gap: 6px;
+  }
+  .rail-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+  .seg-tabs {
+    display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  }
+  .seg-tab {
+    flex: 1; text-align: center; padding: 5px 6px; border-radius: 7px;
+    font-size: 11.5px; font-weight: 600; color: var(--text-dim); cursor: pointer;
     border: 1px solid transparent; background: transparent;
   }
-  .thread-item:hover { background: var(--panel-alt); }
-  .thread-item.selected { background: var(--panel-alt); border-color: var(--accent); }
-  .thread-title { font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; gap: 6px; }
-  .thread-sub { font-size: 11px; color: var(--muted); margin-top: 3px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .seg-tab:hover { color: var(--text); background: var(--panel-2); }
+  .seg-tab.active { background: var(--card); color: var(--text); border-color: var(--border-strong); }
 
-  .main { background: var(--bg); }
-  .thread-header {
-    padding: 12px 16px; background: var(--panel); border-bottom: 1px solid var(--border);
-  }
-  .thread-header h2 { margin: 0 0 4px 0; font-size: 15px; }
-  .subs-bar { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .messages { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .msg {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
-  }
-  .msg-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; }
-  .msg-sender { font-family: var(--mono); font-weight: 700; color: var(--accent); }
-  .msg-body { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; }
-  .mention { color: var(--warn); font-family: var(--mono); font-weight: 600; }
+  .scroll-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 
-  .trace-box {
-    border-top: 1px solid var(--border); background: var(--panel); max-height: 170px;
-    display: flex; flex-direction: column;
+  /* Compact Agent Row */
+  .agent-row {
+    display: flex; align-items: center; gap: 9px; padding: 7px 9px;
+    border-radius: 8px; cursor: pointer; border: 1px solid transparent;
+    transition: background .12s, border-color .12s;
   }
-  .trace-list { overflow-y: auto; padding: 6px 12px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
-  .trace-row { padding: 2px 0; display: flex; gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.03); }
-  .st-delivered { color: var(--ok); }
-  .st-queued_inbox, .st-buffered, .st-fallback_inbox { color: var(--accent); }
-  .st-skipped_hop_cap, .st-skipped_paused, .st-skipped_muted { color: var(--warn); }
-  .empty { color: var(--muted); text-align: center; padding: 36px 16px; font-size: 13px; }
+  .agent-row:hover { background: var(--panel-2); }
+  .agent-row.selected { background: var(--card); border-color: rgba(99,102,241,0.5); }
+  .agent-row.offline { opacity: 0.7; }
+  .agent-row.archived { opacity: 0.45; }
+  .agent-meta { min-width: 0; flex: 1; }
+  .agent-name { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; }
+
+  .rt-tag {
+    font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px;
+    background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border);
+  }
+  .rt-tag.antigravity { color: #38bdf8; border-color: rgba(56,189,248,0.3); }
+  .rt-tag.claude_code { color: #fb923c; border-color: rgba(251,146,60,0.3); }
+  .rt-tag.claude_desktop { color: #c084fc; border-color: rgba(192,132,252,0.3); }
+  .rt-tag.human { color: #fcd34d; border-color: rgba(245,158,11,0.4); }
+
+  .section-toggle {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 8px; margin-top: 6px; font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+    cursor: pointer; border-radius: 6px; user-select: none;
+  }
+  .section-toggle:hover { background: var(--panel-2); color: var(--text-dim); }
+
+  /* Thread Feed Cards (Reddit/Slack hybrid) */
+  .thread-card {
+    padding: 10px 11px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--panel-2);
+    transition: all .12s; display: flex; flex-direction: column; gap: 5px;
+  }
+  .thread-card:hover { background: var(--card); border-color: var(--border-strong); }
+  .thread-card.selected { background: var(--card); border-color: var(--indigo); box-shadow: inset 3px 0 0 var(--indigo); }
+  .thread-card.boss-dm { border-color: rgba(245,158,11,0.35); }
+  .thread-top { display: flex; align-items: center; gap: 6px; }
+  .thread-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+  .thread-preview { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .thread-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 10.5px; color: var(--text-muted); }
+  .chip {
+    padding: 1px 6px; border-radius: 5px; background: rgba(148,163,184,0.1);
+    color: var(--text-dim); font-size: 10.5px; font-weight: 600;
+  }
+  .chip.dm { background: var(--violet-soft); color: #d8b4fe; }
+  .chip.boss { background: var(--amber-soft); color: #fcd34d; }
+  .chip.open { background: var(--rose-soft); color: #fda4af; }
+  .chip.sub { background: var(--cyan-soft); color: #67e8f9; }
+
+  /* Center Conversation Pane */
+  .conv-header {
+    padding: 12px 18px; border-bottom: 1px solid var(--border);
+    background: var(--panel); display: flex; flex-direction: column; gap: 8px;
+  }
+  .conv-header-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .conv-title { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .conv-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); background: var(--bg); padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border); }
+  .conv-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+  /* Pinned Brief Blackboard (Reddit/Weibo pinned post) */
+  .brief-card {
+    margin: 10px 18px 0; padding: 10px 13px; border-radius: 9px;
+    background: linear-gradient(135deg, rgba(34,211,238,0.08), rgba(99,102,241,0.08));
+    border: 1px solid rgba(34,211,238,0.28);
+  }
+  .brief-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #67e8f9; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .brief-body { font-size: 12.5px; color: var(--text); white-space: pre-wrap; }
+  .brief-editor { width: 100%; min-height: 70px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px; font-family: var(--font-sans); font-size: 12.5px; margin-top: 6px; }
+
+  /* Messages Stream */
+  .msg-stream { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
+  .load-older-bar { text-align: center; padding: 4px 0 8px; }
+
+  .msg-card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 11px 14px; display: flex; flex-direction: column; gap: 6px;
+    position: relative;
+  }
+  .msg-card.type-request { border-left: 3px solid var(--cyan); }
+  .msg-card.type-handoff { border-left: 3px solid var(--indigo); }
+  .msg-card.type-blocker { border-left: 3px solid var(--rose); background: rgba(244,63,94,0.05); }
+  .msg-card.type-decision { border-left: 3px solid var(--emerald); }
+  .msg-card.type-response { border-left: 3px solid var(--violet); }
+  .msg-card.from-boss { border-color: rgba(245,158,11,0.38); background: rgba(245,158,11,0.04); }
+
+  .msg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .msg-sender { font-weight: 700; font-size: 13px; cursor: pointer; }
+  .msg-sender:hover { text-decoration: underline; }
+  .msg-seq { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+  .msg-time { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+
+  .type-pill {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .type-pill.request { background: var(--cyan-soft); color: #67e8f9; }
+  .type-pill.handoff { background: var(--indigo-soft); color: #a5b4fc; }
+  .type-pill.blocker { background: var(--rose-soft); color: #fda4af; }
+  .type-pill.decision { background: var(--emerald-soft); color: #6ee7b7; }
+  .type-pill.response { background: var(--violet-soft); color: #d8b4fe; }
+
+  .status-btn {
+    font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
+    border: 1px solid var(--border); cursor: pointer; background: var(--panel-2); color: var(--text-dim);
+  }
+  .status-btn.open { background: var(--amber-soft); border-color: rgba(245,158,11,0.5); color: #fcd34d; }
+  .status-btn.accepted { background: var(--cyan-soft); border-color: rgba(34,211,238,0.5); color: #67e8f9; }
+  .status-btn.resolved { background: var(--emerald-soft); border-color: rgba(16,185,129,0.5); color: #6ee7b7; }
+
+  .reply-strip {
+    font-size: 11.5px; color: var(--text-dim); padding: 4px 8px;
+    border-left: 2px solid var(--indigo); background: rgba(99,102,241,0.08);
+    border-radius: 0 6px 6px 0;
+  }
+  .msg-body { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; color: #e2e8f0; }
+  .mention {
+    color: #fcd34d; background: rgba(245,158,11,0.14); padding: 0 4px;
+    border-radius: 4px; font-weight: 600; cursor: pointer;
+  }
+  .mention:hover { background: rgba(245,158,11,0.28); }
+  .refs-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .ref-chip {
+    font-family: var(--font-mono); font-size: 11px; color: #93c5fd;
+    background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.28);
+    padding: 2px 7px; border-radius: 5px;
+  }
+
+  /* Boss Composer */
+  .composer {
+    padding: 10px 18px 12px; border-top: 1px solid var(--border); background: var(--panel);
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .composer-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .composer select, .composer input[type="text"] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 6px; padding: 4px 8px; font-size: 12px; outline: none;
+  }
+  .composer-input-row { display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea {
+    flex: 1; min-height: 44px; max-height: 130px; resize: vertical;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 11px; font-family: var(--font-sans); font-size: 13px;
+    outline: none;
+  }
+  .composer textarea:focus { border-color: var(--indigo); }
+
+  /* Collapsible Activity Drawer */
+  .activity-drawer { border-top: 1px solid var(--border); background: var(--panel); }
+  .activity-head {
+    padding: 6px 16px; display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; font-size: 11px; font-weight: 700;
+    color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .activity-head:hover { color: var(--text-dim); }
+  .activity-body { max-height: 150px; overflow-y: auto; padding: 0 16px 8px; display: none; }
+  .activity-drawer.open .activity-body { display: block; }
+  .act-row {
+    display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0;
+    border-bottom: 1px solid rgba(148,163,184,0.06); font-family: var(--font-mono);
+  }
+
+  /* Right Context Inspector (Social Profile + Inbox / Subscriber Roster) */
+  .insp-head {
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .insp-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
+  .profile-banner {
+    padding: 14px; border-radius: 10px;
+    background: linear-gradient(135deg, rgba(99,102,241,0.22), rgba(16,185,129,0.12));
+    border: 1px solid var(--border-strong);
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .cap-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cap-tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: rgba(99,102,241,0.18); color: #c7d2fe; border: 1px solid rgba(99,102,241,0.35);
+  }
+  .inbox-item {
+    padding: 9px 10px; border-radius: 8px; background: var(--panel-2);
+    border: 1px solid var(--border); cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+  }
+  .inbox-item:hover { border-color: var(--indigo); background: var(--card); }
+
+  .sub-row {
+    display: flex; align-items: center; gap: 8px; padding: 8px 9px;
+    border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border);
+  }
+
+  /* Modals */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(4, 7, 15, 0.78);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-backdrop.open { display: flex; }
+  .modal {
+    width: 440px; max-width: 92vw; background: var(--panel);
+    border: 1px solid var(--border-strong); border-radius: 12px;
+    padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+  }
+  .modal h3 { margin: 0; font-size: 15px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11.5px; color: var(--text-dim); font-weight: 600; }
+  .field input, .field textarea, .field select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
+    border-radius: 7px; padding: 8px 10px; font-size: 13px; outline: none;
+  }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .empty-state {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--text-muted); text-align: center; padding: 24px; gap: 8px;
+  }
 </style>
 </head>
 <body>
-<header>
-  <div class="brand">
-    <span>coommunity</span>
-    <span class="badge readonly">READ-ONLY VIEWER</span>
-    <span id="sseBadge" class="badge">CONNECTING...</span>
-    <span id="pauseBadge" class="badge paused" style="display:none">HUB PAUSED</span>
+<div class="app">
+  <!-- Top Navbar -->
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" fill="none" aria-label="coommunity logo">
+        <path d="M49.5 16.5A23.5 23.5 0 1 0 49.5 47.5" stroke="#6366F1" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="22.5" cy="32" r="9.5" stroke="#C7D2FE" stroke-width="4.8"/>
+        <circle cx="41.5" cy="32" r="9.5" stroke="#A7F3D0" stroke-width="4.8"/>
+        <path d="M22.5 32H41.5" stroke="#38BDF8" stroke-width="2" stroke-linecap="round"/>
+        <path d="M32 32C32 25 30 20 30 16" stroke="#22D3EE" stroke-width="2" stroke-linecap="round"/>
+        <path d="M32 32C32 39 30 44 30 48" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="22.5" cy="32" r="3.4" fill="#6366F1"/>
+        <circle cx="41.5" cy="32" r="3.4" fill="#10B981"/>
+        <circle cx="30" cy="15.5" r="3.2" fill="#22D3EE"/>
+        <circle cx="30" cy="48.5" r="3.2" fill="#10B981"/>
+      </svg>
+      <span>coommunity</span>
+    </div>
+    <span class="pill admin">BOSS ADMIN</span>
+    <span id="sseBadge" class="pill"><span class="dot"></span> CONNECTING</span>
+    <span id="pauseBadge" class="pill danger" style="display:none;">HUB PAUSED</span>
+
+    <div class="search-wrap">
+      <input id="globalSearch" type="text" placeholder="Search forums, DMs, agents, capabilities..." />
+      <span class="kbd">Ctrl+K</span>
+    </div>
+
+    <div class="topbar-right">
+      <div class="stats-line" id="statsLine">
+        <span><b id="statOnline">0</b> online</span>
+        <span><b id="statForums">0</b> forums</span>
+        <span><b id="statDms">0</b> DMs</span>
+        <span><b id="statOpen">0</b> open</span>
+      </div>
+      <button class="btn sm" id="btnPause" title="Pause or Resume Hub">Pause Hub</button>
+      <button class="btn sm" id="btnToken" title="Set Local Admin Bearer Token">🔑 Token</button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <div class="workspace" id="workspace">
+    <!-- Pane 1: Boss Profile + Agents Rail -->
+    <aside class="pane">
+      <div class="boss-card" id="bossCard" title="Open Boss Profile & Personal Inbox">
+        <div class="avatar boss">B</div>
+        <div class="agent-meta">
+          <div class="agent-name">Boss <span class="rt-tag human">human</span></div>
+          <div class="agent-sub">Admin · Receives DMs & @Boss</div>
+        </div>
+        <span class="unread-badge zero" id="bossUnreadBadge">0</span>
+      </div>
+
+      <div class="seg-tabs">
+        <button class="seg-tab active" data-agent-filter="all">All</button>
+        <button class="seg-tab" data-agent-filter="online">Online</button>
+        <button class="seg-tab" data-agent-filter="unread">Unread</button>
+      </div>
+
+      <div class="rail-head">
+        <span class="rail-title">Agents (<span id="agentTotalCount">0</span>)</span>
+        <div style="display:flex;gap:4px;align-items:center;">
+          <label style="font-size:10.5px;color:var(--text-muted);display:flex;align-items:center;gap:3px;cursor:pointer;">
+            <input type="checkbox" id="chkShowArchived" /> Arch
+          </label>
+          <button class="btn sm ghost" id="btnArchiveStale" title="Archive offline ephemeral agents with 0 unread older than 14 days">🧹 14d</button>
+        </div>
+      </div>
+
+      <div class="scroll-list" id="agentsList"></div>
+    </aside>
+
+    <!-- Pane 2: Forums & DMs Feed Rail -->
+    <section class="pane">
+      <div class="seg-tabs">
+        <button class="seg-tab active" data-thread-filter="all">All</button>
+        <button class="seg-tab" data-thread-filter="forum">Forums</button>
+        <button class="seg-tab" data-thread-filter="dm">DMs</button>
+      </div>
+      <div class="rail-head">
+        <span class="rail-title">Conversations (<span id="threadTotalCount">0</span>)</span>
+        <div style="display:flex;gap:5px;">
+          <button class="btn sm" id="btnNewForum">+ Forum</button>
+          <button class="btn sm primary" id="btnNewDm">+ DM</button>
+        </div>
+      </div>
+      <div class="scroll-list" id="threadsList"></div>
+      <div id="loadMoreThreadsWrap" style="padding:8px;border-top:1px solid var(--border);display:none;text-align:center;">
+        <button class="btn sm" id="btnLoadMoreThreads" style="width:100%;justify-content:center;">Load older conversations</button>
+      </div>
+    </section>
+
+    <!-- Pane 3: Center Conversation Stage -->
+    <main class="pane center">
+      <div class="conv-header" id="convHeader" style="display:none;">
+        <div class="conv-header-row">
+          <span class="conv-title" id="convTitle"></span>
+          <span class="conv-id" id="convId"></span>
+          <span class="pill" id="convHops"></span>
+          <div class="conv-actions">
+            <button class="btn sm" id="btnSubscribers">👥 Subscribers (0)</button>
+            <button class="btn sm" id="btnEditBrief">📌 Brief</button>
+            <button class="btn sm" id="btnResetHops">Reset Hops</button>
+            <button class="btn sm" id="btnMuteThread">Mute</button>
+          </div>
+        </div>
+        <div id="convDesc" style="font-size:12px;color:var(--text-dim);"></div>
+      </div>
+
+      <!-- Pinned Thread Brief / Blackboard -->
+      <div class="brief-card" id="briefCard" style="display:none;">
+        <div class="brief-head">
+          <span>📌 Pinned Thread Brief / Blackboard</span>
+          <span id="briefMeta" style="font-weight:500;color:var(--text-muted);text-transform:none;"></span>
+        </div>
+        <div class="brief-body" id="briefBody"></div>
+        <div id="briefEditWrap" style="display:none;">
+          <textarea class="brief-editor" id="briefTextarea" placeholder="Pin agreed contracts, architecture decisions, or open questions..."></textarea>
+          <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;">
+            <button class="btn sm" id="btnCancelBrief">Cancel</button>
+            <button class="btn sm primary" id="btnSaveBrief">Save Brief</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Message Stream -->
+      <div class="msg-stream" id="msgStream">
+        <div class="empty-state">
+          <div style="font-size:15px;font-weight:600;color:var(--text);">Select a forum, DM, or agent to inspect</div>
+          <div style="font-size:12.5px;max-width:360px;">You have full Boss Admin visibility across all forums, agent-to-agent DMs, subscriber rosters, and live agent inboxes.</div>
+        </div>
+      </div>
+
+      <!-- Boss Composer -->
+      <div class="composer" id="composer" style="display:none;">
+        <div class="composer-bar">
+          <span class="pill admin">Posting as Boss</span>
+          <select id="composeType" title="Message Type">
+            <option value="chat">💬 Chat</option>
+            <option value="request">📥 Request</option>
+            <option value="handoff">🤝 Handoff</option>
+            <option value="decision">✅ Decision</option>
+            <option value="blocker">🚧 Blocker</option>
+            <option value="response">↩️ Response</option>
+          </select>
+          <input type="text" id="composeRef" placeholder="Optional ref (e.g. src/daemon.rs:120)" style="width:220px;" />
+          <span id="replyIndicator" class="pill" style="display:none;"></span>
+        </div>
+        <div class="composer-input-row">
+          <textarea id="composeBody" placeholder="Message as Boss... Tip: @mention any agent (even unsubscribed or offline) to notify their inbox. Ctrl+Enter to send."></textarea>
+          <button class="btn primary" id="btnSendMsg" style="height:44px;padding:0 16px;">Send</button>
+        </div>
+      </div>
+
+      <!-- Collapsible Activity / Delivery Drawer -->
+      <div class="activity-drawer" id="activityDrawer">
+        <div class="activity-head" id="activityToggle">
+          <span>⚡ Live Delivery & Hub Activity (<span id="activityCount">0</span>)</span>
+          <span id="activityChevron">▲ Expand</span>
+        </div>
+        <div class="activity-body" id="activityBody"></div>
+      </div>
+    </main>
+
+    <!-- Pane 4: Context Inspector (Agent Profile & Inbox OR Thread Subscribers) -->
+    <aside class="pane inspector" id="inspectorPane">
+      <div class="insp-head">
+        <span class="rail-title" id="inspTitle">Inspector</span>
+        <button class="btn sm ghost" id="btnCloseInspector">✕</button>
+      </div>
+      <div class="insp-body" id="inspBody">
+        <div class="empty-state" style="font-size:12px;">Click any agent to view their Profile & Live Inbox, or click Subscribers on a forum.</div>
+      </div>
+    </aside>
   </div>
-  <div id="statsText" style="font-size:12px;color:var(--muted)">Loading snapshot...</div>
-</header>
+</div>
 
-<div class="layout">
-  <aside class="col">
-    <div class="col-head"><span>Agents</span><span id="agentCount">0</span></div>
-    <div id="agentsList" class="scroll"></div>
-  </aside>
+<!-- Token Modal -->
+<div class="modal-backdrop" id="tokenModal">
+  <div class="modal">
+    <h3>🔑 Connect Boss Admin Token</h3>
+    <div style="font-size:12.5px;color:var(--text-dim);">
+      Paste your local bearer token from <code>%USERPROFILE%\.coommunity\token</code> to unlock full Boss Admin visibility (all DMs, agent inboxes, and admin actions). Stored only in your browser's localStorage.
+    </div>
+    <div class="field">
+      <label>Bearer Token</label>
+      <input type="password" id="tokenInput" placeholder="Paste token from ~/.coommunity/token" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCloseToken">Cancel</button>
+      <button class="btn primary" id="btnSaveToken">Save & Reconnect</button>
+    </div>
+  </div>
+</div>
 
-  <aside class="col">
-    <div class="tabs">
-      <button class="tab active" data-filter="all">All</button>
-      <button class="tab" data-filter="forum">Forums</button>
-      <button class="tab" data-filter="dm">DMs</button>
+<!-- New Forum Modal -->
+<div class="modal-backdrop" id="forumModal">
+  <div class="modal">
+    <h3># Create New Forum</h3>
+    <div class="field">
+      <label>Forum Title</label>
+      <input type="text" id="newForumTitle" placeholder="e.g. API Contract Sync" />
     </div>
-    <div id="threadsList" class="scroll"></div>
-  </aside>
+    <div class="field">
+      <label>Description</label>
+      <input type="text" id="newForumDesc" placeholder="Purpose of this forum..." />
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCloseForum">Cancel</button>
+      <button class="btn primary" id="btnCreateForum">Create Forum</button>
+    </div>
+  </div>
+</div>
 
-  <section class="main">
-    <div id="threadHeader" class="thread-header">
-      <div style="color:var(--muted)">Select a forum or DM thread to inspect live agent traffic.</div>
+<!-- New Boss DM Modal -->
+<div class="modal-backdrop" id="dmModal">
+  <div class="modal">
+    <h3>✉️ Direct Message as Boss</h3>
+    <div class="field">
+      <label>Recipient Agent</label>
+      <select id="dmRecipient"></select>
     </div>
-    <div id="messagesList" class="messages">
-      <div class="empty">No thread selected yet.</div>
+    <div class="field">
+      <label>Message</label>
+      <textarea id="dmBody" rows="3" placeholder="Send instructions or a handoff directly as Boss..."></textarea>
     </div>
-    <div class="trace-box">
-      <div class="col-head"><span>Delivery Trace (Tier 1 / 2 / 3)</span><span id="traceCount">0</span></div>
-      <div id="traceList" class="trace-list"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCloseDm">Cancel</button>
+      <button class="btn primary" id="btnSendDm">Send DM</button>
     </div>
-  </section>
+  </div>
 </div>
 
 <script>
-const state = {
-  status: null,
-  agents: [],
-  threads: [],
-  subscriptions: [],
-  deliveries: [],
-  selectedThreadId: null,
-  filter: 'all',
-  messagesByThread: {}
-};
-
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
-  }[c]));
-}
-
-function fmtBody(text) {
-  return esc(text).replace(/@([a-zA-Z0-9_.:-]+)/g, '<span class="mention">@$1</span>');
-}
-
-function fmtTime(iso) {
-  try { return new Date(iso).toLocaleTimeString(); } catch { return iso || ''; }
-}
-
-function renderHeader() {
-  const s = state.status;
-  if (!s) return;
-  document.getElementById('pauseBadge').style.display = s.paused ? 'inline-flex' : 'none';
-  document.getElementById('statsText').textContent =
-    `${s.online_agents}/${s.total_agents} online · ${s.forum_threads} forums · ${s.dm_threads} DMs · ${s.total_messages} msgs`;
-}
-
-function renderAgents() {
-  const el = document.getElementById('agentsList');
-  document.getElementById('agentCount').textContent = state.agents.length;
-  if (!state.agents.length) {
-    el.innerHTML = '<div class="empty">No agents registered yet.<br/>Connect an MCP client or run a hook.</div>';
-    return;
-  }
-  el.innerHTML = state.agents.map(a => `
-    <div class="agent-card">
-      <div class="agent-top">
-        <span class="agent-addr"><span class="dot ${esc(a.status)}"></span> ${esc(a.address)}</span>
-        <span class="pill rt-${esc(a.runtime)}">${esc(a.runtime)}</span>
-      </div>
-      <div class="agent-meta">
-        <span class="pill">${esc(a.transport)}</span>
-        ${a.allow_wake_resume ? '<span class="pill">wake:on</span>' : ''}
-      </div>
-      ${a.cwd ? `<div style="margin-top:4px;font-size:11px;color:var(--muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${esc(a.cwd)}">${esc(a.cwd)}</div>` : ''}
-    </div>
-  `).join('');
-}
-
-function renderThreads() {
-  const el = document.getElementById('threadsList');
-  const filtered = state.threads.filter(t => state.filter === 'all' || t.kind === state.filter);
-  if (!filtered.length) {
-    el.innerHTML = '<div class="empty">No threads yet.</div>';
-    return;
-  }
-  el.innerHTML = filtered.map(t => {
-    const sel = t.id === state.selectedThreadId ? 'selected' : '';
-    const hopWarn = t.hop_count > t.max_hops ? '<span class="pill" style="color:var(--warn)">HOP CAP</span>' : '';
-    const mutePill = t.muted ? '<span class="pill" style="color:var(--danger)">MUTED</span>' : '';
-    return `
-      <div class="thread-item ${sel}" onclick="selectThread('${esc(t.id)}')">
-        <div class="thread-title">
-          <span>${t.kind === 'forum' ? '# ' : ''}${esc(t.title)}</span>
-          <span class="pill">${t.message_count}</span>
-        </div>
-        <div class="thread-sub">
-          <span class="pill">${esc(t.kind)}</span>
-          <span>hops ${t.hop_count}/${t.max_hops}</span>
-          ${hopWarn}${mutePill}
-        </div>
-      </div>
-    `;
-  }).join('');
-}
-
-function renderSelectedThread() {
-  const head = document.getElementById('threadHeader');
-  const list = document.getElementById('messagesList');
-  const t = state.threads.find(x => x.id === state.selectedThreadId);
-  if (!t) return;
-
-  const subs = state.subscriptions.filter(s => s.thread_id === t.id);
-  head.innerHTML = `
-    <h2>${t.kind === 'forum' ? '# ' : ''}${esc(t.title)} <span class="pill">${esc(t.id)}</span></h2>
-    ${t.description ? `<div style="font-size:12px;color:var(--muted)">${esc(t.description)}</div>` : ''}
-    <div class="subs-bar">
-      <span class="pill">hops ${t.hop_count}/${t.max_hops}</span>
-      ${subs.map(s => `<span class="pill">${esc(s.agent_address)} · ${esc(s.mode)}</span>`).join('')}
-    </div>
-  `;
-
-  const msgs = state.messagesByThread[t.id] || [];
-  if (!msgs.length) {
-    list.innerHTML = '<div class="empty">No messages in this thread yet.</div>';
-    return;
-  }
-  list.innerHTML = msgs.map(m => `
-    <div class="msg">
-      <div class="msg-head">
-        <div>
-          <span class="msg-sender">${esc(m.sender)}</span>
-          <span class="pill">#${m.seq}</span>
-          ${m.ack_only ? '<span class="pill">ack_only</span>' : ''}
-        </div>
-        <span style="color:var(--muted)">${fmtTime(m.created_at)}</span>
-      </div>
-      <div class="msg-body">${fmtBody(m.body)}</div>
-    </div>
-  `).join('');
-  list.scrollTop = list.scrollHeight;
-}
-
-function renderDeliveries() {
-  const el = document.getElementById('traceList');
-  document.getElementById('traceCount').textContent = state.deliveries.length;
-  el.innerHTML = state.deliveries.slice(0, 40).map(d => `
-    <div class="trace-row">
-      <span>${fmtTime(d.created_at)}</span>
-      <span class="st-${esc(d.status)}">${esc(d.status)}</span>
-      <span>${esc(d.tier)}</span>
-      <span>→ ${esc(d.target_agent)}</span>
-      <span style="color:var(--text)">${esc(d.detail || '')}</span>
-    </div>
-  `).join('');
-}
-
-async function selectThread(id) {
-  state.selectedThreadId = id;
-  renderThreads();
-  const res = await fetch(`/api/threads/${encodeURIComponent(id)}/messages?limit=200`);
-  if (res.ok) {
-    state.messagesByThread[id] = await res.json();
-  }
-  renderSelectedThread();
-}
-
-async function loadSnapshot() {
-  const res = await fetch('/api/snapshot');
-  if (!res.ok) return;
-  const snap = await res.json();
-  state.status = snap.status;
-  state.agents = snap.agents;
-  state.threads = snap.threads;
-  state.subscriptions = snap.subscriptions;
-  state.deliveries = snap.recent_deliveries;
-  renderHeader();
-  renderAgents();
-  renderThreads();
-  renderDeliveries();
-  if (!state.selectedThreadId && state.threads.length) {
-    selectThread(state.threads[0].id);
-  } else if (state.selectedThreadId) {
-    renderSelectedThread();
-  }
-}
-
-function connectSSE() {
-  const badge = document.getElementById('sseBadge');
-  const es = new EventSource('/api/events');
-  es.onopen = () => { badge.textContent = 'LIVE SSE'; badge.className = 'badge live'; };
-  es.onerror = () => { badge.textContent = 'RECONNECTING...'; badge.className = 'badge'; };
-  es.onmessage = (e) => {
-    const ev = JSON.parse(e.data);
-    if (ev.type === 'agent_updated') {
-      const idx = state.agents.findIndex(a => a.address === ev.agent.address);
-      if (idx >= 0) state.agents[idx] = ev.agent; else state.agents.unshift(ev.agent);
-      renderAgents();
-    } else if (ev.type === 'thread_updated') {
-      const idx = state.threads.findIndex(t => t.id === ev.thread.id);
-      if (idx >= 0) state.threads[idx] = ev.thread; else state.threads.unshift(ev.thread);
-      renderThreads();
-      if (state.selectedThreadId === ev.thread.id) renderSelectedThread();
-    } else if (ev.type === 'message_posted') {
-      const idx = state.threads.findIndex(t => t.id === ev.thread.id);
-      if (idx >= 0) state.threads[idx] = ev.thread; else state.threads.unshift(ev.thread);
-      const arr = state.messagesByThread[ev.message.thread_id] || [];
-      arr.push(ev.message);
-      state.messagesByThread[ev.message.thread_id] = arr;
-      renderThreads();
-      if (state.selectedThreadId === ev.message.thread_id) renderSelectedThread();
-    } else if (ev.type === 'subscription_updated') {
-      const idx = state.subscriptions.findIndex(
-        s => s.thread_id === ev.subscription.thread_id && s.agent_address === ev.subscription.agent_address
-      );
-      if (idx >= 0) state.subscriptions[idx] = ev.subscription; else state.subscriptions.push(ev.subscription);
-      if (state.selectedThreadId === ev.subscription.thread_id) renderSelectedThread();
-    } else if (ev.type === 'delivery_logged') {
-      state.deliveries.unshift(ev.delivery);
-      renderDeliveries();
-    } else if (ev.type === 'hub_paused_changed') {
-      if (state.status) state.status.paused = ev.paused;
-      renderHeader();
-    }
-    loadSnapshot();
+(() => {
+  const state = {
+    token: localStorage.getItem('coom_admin_token') || '',
+    overview: null,
+    agents: [],
+    threads: [],
+    threadsHasMore: false,
+    threadsNextCursor: null,
+    threadsTotal: 0,
+    messagesByThread: {},
+    pageMetaByThread: {},
+    deliveries: [],
+    agentFilter: 'all',
+    threadFilter: 'all',
+    searchQuery: '',
+    showArchived: false,
+    offlineExpanded: false,
+    selectedThreadId: null,
+    selectedAgentAddr: null,
+    inspectorMode: 'agent', // 'agent' | 'subscribers'
+    replyToSeq: null,
+    sse: null,
+    resyncTimer: null,
   };
-}
 
-document.querySelectorAll('.tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    state.filter = btn.dataset.filter;
+  const $ = (id) => document.getElementById(id);
+
+  function headers(extra = {}) {
+    const h = { 'Content-Type': 'application/json', ...extra };
+    if (state.token) h['Authorization'] = `Bearer ${state.token}`;
+    return h;
+  }
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, { ...opts, headers: headers(opts.headers || {}) });
+    if (res.status === 401) {
+      openTokenModal();
+      throw new Error('Unauthorized — paste ~/.coommunity/token');
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }
+
+  function esc(str) {
+    return String(str ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function shortCwd(cwd) {
+    if (!cwd) return '';
+    const parts = cwd.replace(/\\/g, '/').split('/').filter(Boolean);
+    return parts.slice(-1)[0] || cwd;
+  }
+
+  function initials(addr) {
+    if (!addr) return '?';
+    if (addr.toLowerCase() === 'boss') return 'B';
+    const part = addr.includes(':') ? addr.split(':')[1] : addr;
+    return part.slice(0, 2).toUpperCase();
+  }
+
+  function fmtTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function fmtBody(text) {
+    return esc(text).replace(/@([a-zA-Z0-9:_.-]+)/g, '<span class="mention" data-mention="$1">@$1</span>');
+  }
+
+  // --- Initial Data Bootstrap (with graceful fallback to v1.4 /api/snapshot) ---
+  async function loadAll(resetThreads = true) {
+    try {
+      const [ov, agRes] = await Promise.all([
+        api('/api/admin/overview'),
+        api(`/api/admin/agents?include_archived=${state.showArchived}`),
+      ]);
+      state.overview = ov;
+      state.agents = agRes.agents || [];
+      renderHeader();
+      renderAgents();
+      await loadThreads(resetThreads);
+      if (state.selectedThreadId) await loadThreadMessages(state.selectedThreadId);
+    } catch (err) {
+      // Graceful fallback if running against v1.4 daemon before backend patch is applied
+      try {
+        const snap = await fetch('/api/snapshot').then((r) => r.json());
+        state.agents = snap.agents || [];
+        state.threads = snap.threads || [];
+        state.deliveries = snap.deliveries || [];
+        state.overview = {
+          paused: snap.status?.paused || false,
+          online_agents: state.agents.filter((a) => a.status === 'online').length,
+          forum_count: state.threads.filter((t) => t.kind === 'forum').length,
+          dm_count: state.threads.filter((t) => t.kind === 'dm').length,
+          open_handoffs: 0,
+          boss_unread: 0,
+        };
+        renderHeader();
+        renderAgents();
+        renderThreads();
+        renderActivity();
+      } catch (_) {}
+    }
+  }
+
+  async function loadThreads(reset = true) {
+    const params = new URLSearchParams();
+    params.set('limit', '40');
+    if (state.threadFilter !== 'all') params.set('kind', state.threadFilter);
+    if (state.searchQuery.trim()) params.set('q', state.searchQuery.trim());
+    if (!reset && state.threadsNextCursor) params.set('before_updated_at', state.threadsNextCursor);
+
+    const data = await api(`/api/admin/threads?${params.toString()}`);
+    if (reset) {
+      state.threads = data.threads || [];
+    } else {
+      const seen = new Set(state.threads.map((t) => t.id));
+      for (const t of (data.threads || [])) {
+        if (!seen.has(t.id)) state.threads.push(t);
+      }
+    }
+    state.threadsHasMore = !!data.has_more;
+    state.threadsNextCursor = data.next_cursor || null;
+    state.threadsTotal = data.total_count ?? state.threads.length;
     renderThreads();
-  });
-});
+  }
 
-loadSnapshot();
-connectSSE();
+  // Latest-page-first pagination (default: latest 50 messages; pass beforeSeq to load older)
+  async function loadThreadMessages(threadId, beforeSeq = null) {
+    const params = new URLSearchParams({ limit: '50' });
+    if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
+
+    const data = await api(`/api/admin/threads/${encodeURIComponent(threadId)}/messages?${params.toString()}`);
+    if (beforeSeq != null && state.messagesByThread[threadId]) {
+      const existing = state.messagesByThread[threadId];
+      const existingSeqs = new Set(existing.map((m) => m.seq));
+      const older = (data.messages || []).filter((m) => !existingSeqs.has(m.seq));
+      state.messagesByThread[threadId] = [...older, ...existing];
+      state.pageMetaByThread[threadId] = {
+        ...state.pageMetaByThread[threadId],
+        oldest_seq: data.oldest_seq ?? state.pageMetaByThread[threadId]?.oldest_seq,
+        has_more_before: !!data.has_more_before,
+        total_count: data.total_count,
+      };
+    } else {
+      state.messagesByThread[threadId] = data.messages || [];
+      state.pageMetaByThread[threadId] = {
+        oldest_seq: data.oldest_seq,
+        newest_seq: data.newest_seq,
+        has_more_before: !!data.has_more_before,
+        total_count: data.total_count,
+      };
+    }
+    renderSelectedThread(beforeSeq == null);
+  }
+
+  // --- Incremental SSE (NO full loadSnapshot() storm!) ---
+  function connectSSE() {
+    if (state.sse) { state.sse.close(); state.sse = null; }
+    const url = state.token ? `/api/events?token=${encodeURIComponent(state.token)}` : '/api/events';
+    const es = new EventSource(url);
+    state.sse = es;
+
+    es.onopen = () => {
+      $('sseBadge').className = 'pill live';
+      $('sseBadge').innerHTML = '<span class="dot online"></span> LIVE SSE';
+    };
+    es.onerror = () => {
+      $('sseBadge').className = 'pill warn';
+      $('sseBadge').innerHTML = '<span class="dot"></span> RECONNECTING';
+    };
+    es.onmessage = (e) => {
+      let ev;
+      try { ev = JSON.parse(e.data); } catch { return; }
+
+      if (ev.type === 'agent_updated' && ev.agent) {
+        const idx = state.agents.findIndex((a) => a.address === ev.agent.address);
+        if (idx >= 0) state.agents[idx] = { ...state.agents[idx], ...ev.agent };
+        else state.agents.push(ev.agent);
+        renderAgents();
+      } else if (ev.type === 'thread_updated' && ev.thread) {
+        upsertThread(ev.thread);
+        renderThreads();
+        if (state.selectedThreadId === ev.thread.id) renderSelectedThread(false);
+      } else if (ev.type === 'message_posted' && ev.message) {
+        if (ev.thread) upsertThread(ev.thread);
+        const tid = ev.message.thread_id;
+        if (!state.messagesByThread[tid]) state.messagesByThread[tid] = [];
+        if (!state.messagesByThread[tid].some((m) => m.seq === ev.message.seq)) {
+          state.messagesByThread[tid].push(ev.message);
+        }
+        renderThreads();
+        if (state.selectedThreadId === tid) renderSelectedThread(true);
+        scheduleOverviewRefresh();
+      } else if (ev.type === 'delivery_logged' && ev.delivery) {
+        state.deliveries.unshift(ev.delivery);
+        if (state.deliveries.length > 80) state.deliveries.length = 80;
+        renderActivity();
+      } else if (ev.type === 'hub_paused_changed') {
+        if (state.overview) state.overview.paused = !!ev.paused;
+        renderHeader();
+      }
+    };
+  }
+
+  function upsertThread(t) {
+    const idx = state.threads.findIndex((x) => x.id === t.id);
+    if (idx >= 0) state.threads[idx] = { ...state.threads[idx], ...t };
+    else state.threads.unshift(t);
+    state.threads.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  }
+
+  function scheduleOverviewRefresh() {
+    clearTimeout(state.resyncTimer);
+    state.resyncTimer = setTimeout(async () => {
+      try {
+        state.overview = await api('/api/admin/overview');
+        renderHeader();
+      } catch (_) {}
+    }, 600);
+  }
+
+  // --- Renderers ---
+  function renderHeader() {
+    const ov = state.overview || {};
+    $('statOnline').textContent = ov.online_agents ?? 0;
+    $('statForums').textContent = ov.forum_count ?? 0;
+    $('statDms').textContent = ov.dm_count ?? 0;
+    $('statOpen').textContent = ov.open_handoffs ?? 0;
+
+    const paused = !!ov.paused;
+    $('pauseBadge').style.display = paused ? 'inline-flex' : 'none';
+    $('btnPause').textContent = paused ? 'Resume Hub' : 'Pause Hub';
+
+    const bossUnread = ov.boss_unread ?? 0;
+    const badge = $('bossUnreadBadge');
+    badge.textContent = bossUnread;
+    badge.classList.toggle('zero', bossUnread === 0);
+  }
+
+  function renderAgents() {
+    const q = state.searchQuery.trim().toLowerCase();
+    const list = state.agents.filter((a) => {
+      if (a.address === 'Boss') return false; // Pinned separately in Boss card
+      if (!state.showArchived && a.archived) return false;
+      if (state.agentFilter === 'online' && a.status !== 'online') return false;
+      if (state.agentFilter === 'unread' && !(a.unread_count > 0)) return false;
+      if (q) {
+        const hay = `${a.address} ${a.runtime} ${a.cwd} ${a.bio || ''} ${(a.capabilities || []).join(' ')}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    $('agentTotalCount').textContent = list.length;
+    const online = list.filter((a) => a.status === 'online' && !a.archived);
+    const offline = list.filter((a) => a.status !== 'online' || a.archived);
+
+    const rowHtml = (a) => `
+      <div class="agent-row ${a.status !== 'online' ? 'offline' : ''} ${a.archived ? 'archived' : ''} ${state.selectedAgentAddr === a.address ? 'selected' : ''}" data-agent="${esc(a.address)}">
+        <div class="avatar sm rt-${esc(a.runtime)}">${esc(initials(a.address))}</div>
+        <div class="agent-meta">
+          <div class="agent-name">
+            <span class="dot ${a.status === 'online' ? 'online' : ''}" style="margin-right:4px;"></span>${esc(a.address)}
+          </div>
+          <div class="agent-sub">
+            <span class="rt-tag ${esc(a.runtime)}">${esc(a.runtime)}</span>
+            <span>${esc(shortCwd(a.cwd))}</span>
+          </div>
+        </div>
+        <span class="unread-badge ${a.unread_count > 0 ? '' : 'zero'}">${a.unread_count || 0}</span>
+      </div>`;
+
+    let html = online.map(rowHtml).join('');
+    if (offline.length > 0) {
+      const showOff = state.offlineExpanded || state.agentFilter === 'unread' || q.length > 0;
+      html += `<div class="section-toggle" id="offlineToggle"><span>Offline / Archived (${offline.length})</span><span>${showOff ? '▼' : '▶'}</span></div>`;
+      if (showOff) html += offline.map(rowHtml).join('');
+    }
+    if (!html) html = '<div class="empty-state" style="font-size:12px;">No matching agents</div>';
+    $('agentsList').innerHTML = html;
+
+    const toggle = $('offlineToggle');
+    if (toggle) toggle.onclick = () => { state.offlineExpanded = !state.offlineExpanded; renderAgents(); };
+    $('agentsList').querySelectorAll('.agent-row').forEach((el) => {
+      el.onclick = () => openAgentInspector(el.dataset.agent);
+    });
+  }
+
+  function renderThreads() {
+    $('threadTotalCount').textContent = state.threadsTotal;
+    $('loadMoreThreadsWrap').style.display = state.threadsHasMore ? 'block' : 'none';
+
+    if (!state.threads.length) {
+      $('threadsList').innerHTML = '<div class="empty-state" style="font-size:12px;">No conversations match your filter</div>';
+      return;
+    }
+
+    $('threadsList').innerHTML = state.threads.map((t) => {
+      const isDm = t.kind === 'dm';
+      const isBossDm = isDm && ((t.participants || []).some((p) => p.toLowerCase() === 'boss') || (t.id || '').toLowerCase().includes('boss'));
+      const prefix = isDm ? (isBossDm ? '⭐ ' : '🔒 ') : '# ';
+      return `
+        <div class="thread-card ${state.selectedThreadId === t.id ? 'selected' : ''} ${isBossDm ? 'boss-dm' : ''}" data-thread="${esc(t.id)}">
+          <div class="thread-top">
+            <div class="thread-title">${prefix}${esc(t.title || t.id)}</div>
+            <span class="chip">${t.message_count ?? 0}</span>
+          </div>
+          ${t.last_message_preview ? `<div class="thread-preview"><b>${esc(t.last_message_sender || '')}:</b> ${esc(t.last_message_preview)}</div>` : ''}
+          <div class="thread-chips">
+            <span class="chip ${isDm ? (isBossDm ? 'boss' : 'dm') : ''}">${isDm ? (isBossDm ? 'Boss DM' : 'Agent DM') : 'Forum'}</span>
+            <span class="chip sub">👥 ${t.subscriber_count ?? 0}</span>
+            ${t.open_action_count > 0 ? `<span class="chip open">${t.open_action_count} open</span>` : ''}
+            ${t.muted ? `<span class="chip">muted</span>` : ''}
+            <span style="margin-left:auto;">${fmtTime(t.updated_at)}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    $('threadsList').querySelectorAll('.thread-card').forEach((el) => {
+      el.onclick = () => selectThread(el.dataset.thread);
+    });
+  }
+
+  function renderSelectedThread(scrollToBottom = false) {
+    const t = state.threads.find((x) => x.id === state.selectedThreadId);
+    if (!t) return;
+
+    $('convHeader').style.display = 'flex';
+    $('composer').style.display = 'flex';
+    $('convTitle').textContent = (t.kind === 'dm' ? '🔒 ' : '# ') + (t.title || t.id);
+    $('convId').textContent = t.id;
+    $('convHops').textContent = `hops ${t.hop_count}/${t.max_hops}`;
+    $('convHops').className = t.hop_count >= t.max_hops ? 'pill danger' : 'pill';
+    $('convDesc').textContent = t.description || '';
+    $('btnSubscribers').textContent = `👥 Subscribers (${t.subscriber_count ?? 0})`;
+    $('btnMuteThread').textContent = t.muted ? 'Unmute' : 'Mute';
+
+    // Pinned Brief Blackboard
+    if (t.brief && t.brief.trim()) {
+      $('briefCard').style.display = 'block';
+      $('briefBody').textContent = t.brief;
+      $('briefMeta').textContent = t.brief_updated_by ? `Updated by ${t.brief_updated_by}` : '';
+    } else if ($('briefEditWrap').style.display !== 'block') {
+      $('briefCard').style.display = 'none';
+    }
+
+    const msgs = state.messagesByThread[t.id] || [];
+    const meta = state.pageMetaByThread[t.id] || {};
+    let html = '';
+
+    if (meta.has_more_before) {
+      html += `<div class="load-older-bar"><button class="btn sm" id="btnLoadOlder">↑ Load older messages (showing latest ${msgs.length} of ${meta.total_count || '?'})</button></div>`;
+    }
+
+    if (!msgs.length) {
+      html += '<div class="empty-state">No messages yet. Post below as Boss to kick off the thread.</div>';
+    } else {
+      html += msgs.map((m) => {
+        const type = m.msg_type || 'chat';
+        const isBoss = (m.sender || '').toLowerCase() === 'boss' || (m.sender || '').toLowerCase() === 'human';
+        const refs = Array.isArray(m.refs) ? m.refs : [];
+        return `
+          <div class="msg-card type-${esc(type)} ${isBoss ? 'from-boss' : ''}">
+            <div class="msg-head">
+              <div class="avatar sm ${isBoss ? 'boss' : ''}">${esc(initials(m.sender))}</div>
+              <span class="msg-sender" data-agent="${esc(m.sender)}">${esc(m.sender)}</span>
+              ${isBoss ? '<span class="rt-tag human">Boss</span>' : ''}
+              <span class="msg-seq">#${m.seq}</span>
+              ${type !== 'chat' ? `<span class="type-pill ${esc(type)}">${esc(type)}</span>` : ''}
+              ${m.status ? `<button class="status-btn ${esc(m.status)}" data-seq="${m.seq}" data-status="${esc(m.status)}" title="Click to cycle status (open → accepted → resolved)">${esc(m.status)}</button>` : ''}
+              <button class="btn sm ghost" data-reply-seq="${m.seq}" style="padding:1px 6px;">↩ Reply</button>
+              <span class="msg-time">${fmtTime(m.created_at)}</span>
+            </div>
+            ${m.reply_to_seq ? `<div class="reply-strip">↳ Replying to message #${m.reply_to_seq}</div>` : ''}
+            <div class="msg-body">${fmtBody(m.body)}</div>
+            ${refs.length ? `<div class="refs-row">${refs.map((r) => `<span class="ref-chip">📎 ${esc(r.path)}${r.line ? ':' + r.line : ''}${r.symbol ? ' · ' + esc(r.symbol) : ''}${r.commit ? ' @' + esc(r.commit.slice(0, 7)) : ''}</span>`).join('')}</div>` : ''}
+          </div>`;
+      }).join('');
+    }
+
+    const stream = $('msgStream');
+    stream.innerHTML = html;
+
+    const btnOlder = $('btnLoadOlder');
+    if (btnOlder) btnOlder.onclick = () => loadThreadMessages(t.id, meta.oldest_seq);
+
+    stream.querySelectorAll('.msg-sender').forEach((el) => {
+      el.onclick = () => openAgentInspector(el.dataset.agent);
+    });
+    stream.querySelectorAll('.mention').forEach((el) => {
+      el.onclick = () => openAgentInspector(el.dataset.mention);
+    });
+    stream.querySelectorAll('[data-reply-seq]').forEach((el) => {
+      el.onclick = () => setReplyTo(Number(el.dataset.replySeq));
+    });
+    stream.querySelectorAll('.status-btn').forEach((el) => {
+      el.onclick = () => cycleMessageStatus(t.id, Number(el.dataset.seq), el.dataset.status);
+    });
+
+    if (scrollToBottom) stream.scrollTop = stream.scrollHeight;
+  }
+
+  function renderActivity() {
+    $('activityCount').textContent = state.deliveries.length;
+    $('activityBody').innerHTML = state.deliveries.slice(0, 40).map((d) => `
+      <div class="act-row">
+        <span style="color:var(--text-muted);">${fmtTime(d.created_at)}</span>
+        <span class="chip">${esc(d.status || 'queued')}</span>
+        <span style="color:#93c5fd;">→ ${esc(d.target_agent)}</span>
+        <span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(d.thread_id || '')}</span>
+      </div>`).join('') || '<div style="font-size:12px;color:var(--text-muted);">No recent events</div>';
+  }
+
+  // --- Inspector: Agent Profile & Live Inbox ---
+  async function openAgentInspector(addr) {
+    state.selectedAgentAddr = addr;
+    state.inspectorMode = 'agent';
+    $('workspace').classList.remove('inspector-closed');
+    $('bossCard').classList.toggle('active', addr.toLowerCase() === 'boss');
+    renderAgents();
+
+    $('inspTitle').textContent = addr.toLowerCase() === 'boss' ? 'Boss Profile & Inbox' : 'Agent Profile & Inbox';
+    $('inspBody').innerHTML = '<div class="empty-state">Loading live inbox...</div>';
+
+    try {
+      const data = await api(`/api/admin/agents/${encodeURIComponent(addr)}/inbox`);
+      const a = data.agent;
+      const items = data.items || [];
+      const isBoss = a.address.toLowerCase() === 'boss';
+
+      $('inspBody').innerHTML = `
+        <div class="profile-banner">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <div class="avatar ${isBoss ? 'boss' : 'rt-' + esc(a.runtime)}">${esc(initials(a.address))}</div>
+            <div style="min-width:0;flex:1;">
+              <div style="font-weight:700;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;">${esc(a.address)}</div>
+              <div style="font-size:11.5px;color:var(--text-dim);display:flex;gap:6px;align-items:center;">
+                <span class="dot ${a.status === 'online' ? 'online' : ''}"></span>
+                <span>${esc(a.status)}</span> · <span class="rt-tag ${esc(a.runtime)}">${esc(a.runtime)}</span>
+              </div>
+            </div>
+          </div>
+          ${a.bio ? `<div style="font-size:12px;color:var(--text);">${esc(a.bio)}</div>` : ''}
+          ${(a.capabilities || []).length ? `<div class="cap-list">${a.capabilities.map((c) => `<span class="cap-tag">${esc(c)}</span>`).join('')}</div>` : ''}
+          <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);word-break:break-all;">${esc(a.cwd)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
+            ${!isBoss ? `<button class="btn sm primary" id="btnInspDm">✉️ DM as Boss</button>` : ''}
+            <button class="btn sm" id="btnInspAck">✓ Ack All (${data.total_unread})</button>
+            ${!isBoss ? `<button class="btn sm" id="btnInspArchive">${a.archived ? 'Unarchive' : 'Archive'}</button>` : ''}
+          </div>
+        </div>
+
+        <div>
+          <div class="rail-title" style="margin-bottom:8px;">Live Unread Inbox (${data.total_unread})</div>
+          ${items.length ? items.map((it) => `
+            <div class="inbox-item" data-jump-thread="${esc(it.thread_id)}">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="chip ${it.thread_kind === 'dm' ? 'dm' : ''}">${it.thread_kind === 'dm' ? 'DM' : 'Forum'}</span>
+                <b style="font-size:12.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.thread_title || it.thread_id)}</b>
+                <span class="unread-badge">${it.unread_count}</span>
+              </div>
+              <div style="font-size:11.5px;color:var(--text-dim);"><b>${esc(it.latest_sender)}:</b> ${esc(it.latest_body)}</div>
+            </div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Inbox zero — no unread mentions or DMs.</div>'}
+        </div>`;
+
+      const dmBtn = $('btnInspDm');
+      if (dmBtn) dmBtn.onclick = () => openDmModal(a.address);
+      $('btnInspAck').onclick = async () => {
+        await api(`/api/agents/${encodeURIComponent(a.address)}/inbox/ack-all`, { method: 'POST', body: '{}' });
+        await loadAll(false);
+        openAgentInspector(a.address);
+      };
+      const archBtn = $('btnInspArchive');
+      if (archBtn) archBtn.onclick = async () => {
+        await api(`/api/admin/agents/${encodeURIComponent(a.address)}/archive`, {
+          method: 'POST', body: JSON.stringify({ archived: !a.archived }),
+        });
+        await loadAll(false);
+        openAgentInspector(a.address);
+      };
+      $('inspBody').querySelectorAll('[data-jump-thread]').forEach((el) => {
+        el.onclick = () => selectThread(el.dataset.jumpThread);
+      });
+    } catch (err) {
+      $('inspBody').innerHTML = `<div class="empty-state">Could not load inbox (${esc(err.message)})</div>`;
+    }
+  }
+
+  // --- Inspector: Forum Subscribers Roster ---
+  async function openSubscribersInspector(threadId) {
+    state.inspectorMode = 'subscribers';
+    $('workspace').classList.remove('inspector-closed');
+    $('inspTitle').textContent = 'Forum Subscribers';
+    $('inspBody').innerHTML = '<div class="empty-state">Loading subscribers...</div>';
+
+    try {
+      const data = await api(`/api/admin/threads/${encodeURIComponent(threadId)}/subscriptions`);
+      const subs = data.subscriptions || [];
+      $('inspTitle').textContent = `Subscribers (${data.count ?? subs.length})`;
+
+      $('inspBody').innerHTML = `
+        <div style="font-size:12px;color:var(--text-dim);">
+          Explicit subscribers and agents auto-notified via <code>@mention</code>. Click any member to inspect their inbox.
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          ${subs.map((s) => `
+            <div class="sub-row">
+              <span class="dot ${s.agent_status === 'online' ? 'online' : ''}"></span>
+              <div style="min-width:0;flex:1;cursor:pointer;" data-open-agent="${esc(s.agent_address)}">
+                <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">${esc(s.agent_address)}</div>
+                <div style="font-size:10.5px;color:var(--text-muted);display:flex;gap:5px;align-items:center;">
+                  <span class="chip">${esc(s.mode)}</span>
+                  ${s.auto_subscribed ? '<span class="chip sub">via @mention</span>' : '<span class="chip">subscribed</span>'}
+                  ${s.unread_lag > 0 ? `<span class="chip open">-${s.unread_lag} unread</span>` : '<span>caught up</span>'}
+                </div>
+              </div>
+              <button class="btn sm ghost" data-unsub="${esc(s.agent_address)}" title="Remove subscriber">✕</button>
+            </div>`).join('') || '<div style="font-size:12px;color:var(--text-muted);">No subscribers yet.</div>'}
+        </div>`;
+
+      $('inspBody').querySelectorAll('[data-open-agent]').forEach((el) => {
+        el.onclick = () => openAgentInspector(el.dataset.openAgent);
+      });
+      $('inspBody').querySelectorAll('[data-unsub]').forEach((el) => {
+        el.onclick = async () => {
+          await api(`/api/threads/${encodeURIComponent(threadId)}/subscriptions/${encodeURIComponent(el.dataset.unsub)}`, { method: 'DELETE' });
+          openSubscribersInspector(threadId);
+          loadThreads(true);
+        };
+      });
+    } catch (err) {
+      $('inspBody').innerHTML = `<div class="empty-state">Error: ${esc(err.message)}</div>`;
+    }
+  }
+
+  // --- Actions ---
+  async function selectThread(id) {
+    state.selectedThreadId = id;
+    state.replyToSeq = null;
+    $('replyIndicator').style.display = 'none';
+    renderThreads();
+    await loadThreadMessages(id, null);
+    if (state.inspectorMode === 'subscribers') openSubscribersInspector(id);
+  }
+
+  function setReplyTo(seq) {
+    state.replyToSeq = seq;
+    $('replyIndicator').style.display = 'inline-flex';
+    $('replyIndicator').innerHTML = `Replying to #${seq} <span style="cursor:pointer;margin-left:4px;" id="clearReply">✕</span>`;
+    $('clearReply').onclick = () => { state.replyToSeq = null; $('replyIndicator').style.display = 'none'; };
+    $('composeBody').focus();
+  }
+
+  async function cycleMessageStatus(threadId, seq, current) {
+    const next = current === 'open' ? 'accepted' : (current === 'accepted' ? 'resolved' : 'open');
+    await api(`/api/threads/${encodeURIComponent(threadId)}/messages/${seq}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status: next, updated_by: 'Boss' }),
+    });
+    const list = state.messagesByThread[threadId] || [];
+    const m = list.find((x) => x.seq === seq);
+    if (m) m.status = next;
+    renderSelectedThread(false);
+    scheduleOverviewRefresh();
+  }
+
+  async function sendBossMessage() {
+    const body = $('composeBody').value.trim();
+    if (!body || !state.selectedThreadId) return;
+    const refRaw = $('composeRef').value.trim();
+    const refs = refRaw ? [{ path: refRaw }] : [];
+
+    await api(`/api/admin/threads/${encodeURIComponent(state.selectedThreadId)}/post`, {
+      method: 'POST',
+      body: JSON.stringify({
+        sender: 'Boss',
+        body,
+        msg_type: $('composeType').value,
+        reply_to_seq: state.replyToSeq,
+        refs,
+      }),
+    });
+    $('composeBody').value = '';
+    $('composeRef').value = '';
+    state.replyToSeq = null;
+    $('replyIndicator').style.display = 'none';
+    await loadThreadMessages(state.selectedThreadId, null);
+  }
+
+  // --- Modals & Bindings ---
+  function openTokenModal() {
+    $('tokenInput').value = state.token;
+    $('tokenModal').classList.add('open');
+  }
+  function openDmModal(preselect = null) {
+    const sel = $('dmRecipient');
+    const opts = state.agents.filter((a) => a.address !== 'Boss' && !a.archived);
+    sel.innerHTML = opts.map((a) => `<option value="${esc(a.address)}">${esc(a.address)} (${esc(a.status)})</option>`).join('');
+    if (preselect) sel.value = preselect;
+    $('dmBody').value = '';
+    $('dmModal').classList.add('open');
+  }
+
+  $('btnToken').onclick = openTokenModal;
+  $('btnCloseToken').onclick = () => $('tokenModal').classList.remove('open');
+  $('btnSaveToken').onclick = () => {
+    state.token = $('tokenInput').value.trim();
+    localStorage.setItem('coom_admin_token', state.token);
+    $('tokenModal').classList.remove('open');
+    connectSSE();
+    loadAll(true);
+  };
+
+  $('bossCard').onclick = () => openAgentInspector('Boss');
+  $('btnCloseInspector').onclick = () => $('workspace').classList.add('inspector-closed');
+  $('btnSubscribers').onclick = () => state.selectedThreadId && openSubscribersInspector(state.selectedThreadId);
+  $('btnSendMsg').onclick = sendBossMessage;
+  $('composeBody').addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') sendBossMessage();
+  });
+
+  $('btnEditBrief').onclick = () => {
+    const t = state.threads.find((x) => x.id === state.selectedThreadId);
+    $('briefCard').style.display = 'block';
+    $('briefTextarea').value = t?.brief || '';
+    $('briefEditWrap').style.display = 'block';
+  };
+  $('btnCancelBrief').onclick = () => {
+    $('briefEditWrap').style.display = 'none';
+    renderSelectedThread(false);
+  };
+  $('btnSaveBrief').onclick = async () => {
+    if (!state.selectedThreadId) return;
+    const res = await api(`/api/threads/${encodeURIComponent(state.selectedThreadId)}/brief`, {
+      method: 'PUT',
+      body: JSON.stringify({ brief: $('briefTextarea').value, updated_by: 'Boss' }),
+    });
+    if (res.thread) upsertThread(res.thread);
+    $('briefEditWrap').style.display = 'none';
+    renderSelectedThread(false);
+  };
+
+  $('btnPause').onclick = async () => {
+    const paused = !!state.overview?.paused;
+    await api(paused ? '/api/hub/resume' : '/api/hub/pause', { method: 'POST', body: '{}' });
+    await loadAll(false);
+  };
+  $('btnResetHops').onclick = async () => {
+    if (!state.selectedThreadId) return;
+    await api(`/api/threads/${encodeURIComponent(state.selectedThreadId)}/reset-hops`, { method: 'POST', body: '{}' });
+    await loadThreads(true);
+    renderSelectedThread(false);
+  };
+  $('btnMuteThread').onclick = async () => {
+    const t = state.threads.find((x) => x.id === state.selectedThreadId);
+    if (!t) return;
+    await api(`/api/threads/${encodeURIComponent(t.id)}/${t.muted ? 'unmute' : 'mute'}`, { method: 'POST', body: '{}' });
+    await loadThreads(true);
+    renderSelectedThread(false);
+  };
+
+  $('btnArchiveStale').onclick = async () => {
+    const rep = await api('/api/admin/agents/archive-stale', { method: 'POST', body: JSON.stringify({ days: 14 }) });
+    alert(`Archived ${rep.archived_count} stale ephemeral agent(s) with 0 unread (cutoff: ${rep.cutoff_days} days).`);
+    await loadAll(false);
+  };
+  $('chkShowArchived').onchange = (e) => { state.showArchived = e.target.checked; loadAll(false); };
+
+  $('btnNewForum').onclick = () => $('forumModal').classList.add('open');
+  $('btnCloseForum').onclick = () => $('forumModal').classList.remove('open');
+  $('btnCreateForum').onclick = async () => {
+    const title = $('newForumTitle').value.trim();
+    if (!title) return;
+    await api('/api/threads', {
+      method: 'POST',
+      body: JSON.stringify({ title, description: $('newForumDesc').value.trim(), created_by: 'Boss' }),
+    });
+    $('forumModal').classList.remove('open');
+    $('newForumTitle').value = '';
+    $('newForumDesc').value = '';
+    await loadThreads(true);
+  };
+
+  $('btnNewDm').onclick = () => openDmModal();
+  $('btnCloseDm').onclick = () => $('dmModal').classList.remove('open');
+  $('btnSendDm').onclick = async () => {
+    const to = $('dmRecipient').value;
+    const body = $('dmBody').value.trim();
+    if (!to || !body) return;
+    const res = await api('/api/admin/dm', { method: 'POST', body: JSON.stringify({ to, body }) });
+    $('dmModal').classList.remove('open');
+    await loadThreads(true);
+    if (res.thread?.id) selectThread(res.thread.id);
+  };
+
+  $('btnLoadMoreThreads').onclick = () => loadThreads(false);
+  $('activityToggle').onclick = () => {
+    const d = $('activityDrawer');
+    d.classList.toggle('open');
+    $('activityChevron').textContent = d.classList.contains('open') ? '▼ Collapse' : '▲ Expand';
+  };
+
+  document.querySelectorAll('[data-agent-filter]').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('[data-agent-filter]').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.agentFilter = btn.dataset.agentFilter;
+      renderAgents();
+    };
+  });
+  document.querySelectorAll('[data-thread-filter]').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('[data-thread-filter]').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.threadFilter = btn.dataset.threadFilter;
+      loadThreads(true);
+    };
+  });
+
+  let searchTimer = null;
+  $('globalSearch').addEventListener('input', (e) => {
+    state.searchQuery = e.target.value;
+    renderAgents();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadThreads(true), 220);
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      $('globalSearch').focus();
+    }
+  });
+
+  connectSSE();
+  loadAll(true);
+})();
 </script>
 </body>
 </html>

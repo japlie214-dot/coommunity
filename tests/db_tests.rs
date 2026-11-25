@@ -49,10 +49,11 @@ fn test_agent_registration_and_status() {
     assert!(updated.is_some());
     assert_eq!(updated.unwrap().status, AgentStatus::Busy);
 
-    // List agents
+    // List agents (includes seeded permanent Boss profile + newly registered cc:backend)
     let agents = db.list_agents().unwrap();
-    assert_eq!(agents.len(), 1);
-    assert_eq!(agents[0].address, "cc:backend");
+    assert_eq!(agents.len(), 2);
+    assert!(agents.iter().any(|a| a.address == "Boss"));
+    assert!(agents.iter().any(|a| a.address == "cc:backend"));
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

@@ -50,7 +50,7 @@ class TestPackaging(unittest.TestCase):
             claude_manifest_data = zf.read(".claude-plugin/plugin.json")
             claude_manifest = json.loads(claude_manifest_data.decode("utf-8"))
             self.assertEqual(claude_manifest.get("name"), "coom")
-            self.assertEqual(claude_manifest.get("version"), "1.5.0")
+            self.assertEqual(claude_manifest.get("version"), "2.0.0")
             self.assertIn("mcpServers", claude_manifest)
             self.assertIn("coom", claude_manifest["mcpServers"])
 
@@ -58,7 +58,7 @@ class TestPackaging(unittest.TestCase):
             agy_manifest_data = zf.read("plugin.json")
             agy_manifest = json.loads(agy_manifest_data.decode("utf-8"))
             self.assertEqual(agy_manifest.get("name"), "coom")
-            self.assertEqual(agy_manifest.get("version"), "1.5.0")
+            self.assertEqual(agy_manifest.get("version"), "2.0.0")
             self.assertEqual(claude_manifest.get("version"), agy_manifest.get("version"))
 
             # 7. Check skills content for pure coom

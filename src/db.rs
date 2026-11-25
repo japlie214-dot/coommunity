@@ -119,9 +119,16 @@ impl Database {
             [],
         )?;
 
+        crate::v2_db::apply_v2_migrations(&conn)?;
+
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// Expose shared SQLite connection handle for v2 handlers and background sweepers.
+    pub fn conn_arc(&self) -> Arc<Mutex<Connection>> {
+        self.conn.clone()
     }
 
     fn lock_conn(&self) -> Result<MutexGuard<'_, Connection>> {
@@ -324,6 +331,9 @@ impl Database {
 
     pub fn resolve_recipient_alias(&self, target: &str) -> String {
         let normalized = target.trim().trim_start_matches('@').to_ascii_lowercase();
+        if matches!(normalized.as_str(), "boss" | "human" | "user" | "admin") {
+            return crate::v2_models::BOSS_ADDRESS.to_string();
+        }
         let runtime_match = match normalized.as_str() {
             "cc" | "claude" | "claude_code" | "claude-code" => Some(("claude", "cc:%")),
             "cc-desktop" | "claude_desktop" | "claude-desktop" => {
@@ -399,7 +409,7 @@ impl Database {
         default_max_hops: i64,
     ) -> Result<Thread> {
         let mut pair = [agent_a.to_string(), agent_b.to_string()];
-        pair.sort();
+        pair.sort_by(|a, b| a.to_ascii_lowercase().cmp(&b.to_ascii_lowercase()));
         let dm_id = format!("dm:{}:{}", sanitize_slug(&pair[0]), sanitize_slug(&pair[1]));
         let now = Utc::now().to_rfc3339();
 
@@ -737,8 +747,8 @@ impl Database {
                 ],
             )?;
 
-            // Increment hop_count unless sender is "human" (human resets loop counter)
-            if sender == "human" {
+            // Increment hop_count unless sender is human/Boss (human resets loop counter)
+            if sender.eq_ignore_ascii_case("human") || sender.eq_ignore_ascii_case("boss") {
                 conn.execute(
                     "UPDATE threads SET updated_at = ?1, hop_count = 0 WHERE id = ?2",
                     params![&now, thread_id],

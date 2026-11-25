@@ -6,8 +6,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::config::Config;
 use crate::models::{
-    mention_matches_agent, AckInboxRequest, CreateThreadRequest, PostMessageRequest,
-    RegisterAgentRequest, SendDmRequest, SubscribeRequest,
+    mention_matches_agent, AckInboxRequest, CreateThreadRequest, RegisterAgentRequest,
+    SubscribeRequest,
 };
 
 pub async fn run_mcp_stdio(
@@ -202,10 +202,11 @@ pub async fn run_mcp_stdio(
                     "instructions": format!(
                         "You are connected to the local coom multi-agent hub as `{my_address}`. \
                          Call `check_inbox` when reminded by hooks (or at session start in Claude Desktop) \
-                         to see unread DMs and forum @mentions. Calling `read_thread` automatically marks \
-                         that thread read; use `ack_inbox` or `ack_all_inbox` to clear reminders without reading. \
-                         Use `list_agents` to discover peers, `dm` for 1-to-1 messages, and \
-                         `create_thread`/`subscribe`/`post` for multi-agent forums."
+                         to see unread DMs and forum @mentions. Calling `read_thread` returns the latest page \
+                         and automatically marks that thread read; use `ack_inbox` or `ack_all_inbox` to clear reminders. \
+                         Use `find_agents`/`list_agents` to discover peers, `update_profile` to publish capabilities, \
+                         `dm` (`to: \"Boss\"` for the human operator) for 1-to-1 messages, and \
+                         `create_thread`/`subscribe`/`post`/`set_thread_brief`/`resolve_message` for forums and typed handoffs."
                     )
                 }
             })),
@@ -380,22 +381,24 @@ async fn handle_tool_call(
             Ok(v)
         }
         "dm" => {
-            let req = SendDmRequest {
-                from: my_address.to_string(),
-                to: req_str(args, "to")?,
-                body: req_str(args, "body")?,
-                ack_only: args
-                    .get("ack_only")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
-            };
-            let v: Value = client
-                .post(format!("{base}/api/dm"))
-                .json(&req)
-                .send()
-                .await?
-                .json()
-                .await?;
+            let mut payload = json!({
+                "from": my_address,
+                "to": req_str(args, "to")?,
+                "body": req_str(args, "body")?,
+                "ack_only": args.get("ack_only").and_then(|v| v.as_bool()).unwrap_or(false),
+                "msg_type": args.get("msg_type").and_then(|v| v.as_str()).unwrap_or("chat"),
+                "refs": args.get("refs").cloned().unwrap_or_else(|| json!([]))
+            });
+            if payload["msg_type"].is_null() {
+                payload["msg_type"] = json!("chat");
+            }
+            let resp = client.post(format!("{base}/api/v2/dm")).json(&payload).send().await?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                return Err(anyhow!("DM failed ({status}): {msg}"));
+            }
+            let v: Value = resp.json().await?;
             Ok(v)
         }
         "create_thread" => {
@@ -432,9 +435,22 @@ async fn handle_tool_call(
             Ok(v)
         }
         "list_threads" => {
+            let mut query_params: Vec<(&str, String)> = vec![("reader", my_address.to_string())];
+            if let Some(kind) = args.get("kind").and_then(|v| v.as_str()) {
+                query_params.push(("kind", kind.to_string()));
+            }
+            if let Some(q) = args.get("q").and_then(|v| v.as_str()) {
+                query_params.push(("q", q.to_string()));
+            }
+            if let Some(cursor) = args.get("before_updated_at").and_then(|v| v.as_str()) {
+                query_params.push(("before_updated_at", cursor.to_string()));
+            }
+            if let Some(limit) = args.get("limit").and_then(|v| v.as_i64()) {
+                query_params.push(("limit", limit.to_string()));
+            }
             let v: Value = client
-                .get(format!("{base}/api/threads"))
-                .query(&[("reader", my_address)])
+                .get(format!("{base}/api/v2/threads"))
+                .query(&query_params)
                 .send()
                 .await?
                 .json()
@@ -452,56 +468,136 @@ async fn handle_tool_call(
                         .collect()
                 })
                 .unwrap_or_default();
-            let req = PostMessageRequest {
-                sender: my_address.to_string(),
-                body: req_str(args, "body")?,
-                mentions,
-                ack_only: args
-                    .get("ack_only")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
-            };
+            let mut payload = json!({
+                "sender": my_address,
+                "body": req_str(args, "body")?,
+                "mentions": mentions,
+                "ack_only": args.get("ack_only").and_then(|v| v.as_bool()).unwrap_or(false),
+                "msg_type": args.get("msg_type").and_then(|v| v.as_str()).unwrap_or("chat"),
+                "refs": args.get("refs").cloned().unwrap_or_else(|| json!([]))
+            });
+            if let Some(status) = args.get("status").and_then(|v| v.as_str()) {
+                payload["status"] = json!(status);
+            }
+            if let Some(reply_to) = args.get("reply_to_seq").and_then(|v| v.as_i64()) {
+                payload["reply_to_seq"] = json!(reply_to);
+            }
             let resp = client
-                .post(format!("{base}/api/threads/{thread_id}/messages"))
-                .json(&req)
+                .post(format!("{base}/api/v2/threads/{thread_id}/messages"))
+                .json(&payload)
                 .send()
                 .await?;
             if resp.status() == reqwest::StatusCode::FORBIDDEN {
-                let err_msg = resp
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "Access denied: not authorized to post in private DM".to_string());
-                return Err(anyhow!("FORBIDDEN: {err_msg}"));
+                return Err(anyhow!("FORBIDDEN: Access denied: not authorized to post in private DM"));
+            }
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                return Err(anyhow!("Post failed ({status}): {msg}"));
             }
             let v: Value = resp.json().await?;
             Ok(v)
         }
         "read_thread" => {
             let thread_id = req_str(args, "thread_id")?;
-            let since_seq = args.get("since_seq").and_then(|v| v.as_i64()).unwrap_or(0);
             let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            let auto_ack = args
-                .get("auto_ack")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
+            let mut query_params: Vec<(&str, String)> = vec![
+                ("limit", limit.to_string()),
+                ("reader", my_address.to_string()),
+            ];
+            if let Some(before) = args.get("before_seq").and_then(|v| v.as_i64()) {
+                query_params.push(("before_seq", before.to_string()));
+            }
+            if let Some(since) = args.get("since_seq").and_then(|v| v.as_i64()) {
+                query_params.push(("since_seq", since.to_string()));
+            }
             let resp = client
-                .get(format!("{base}/api/threads/{thread_id}/messages"))
-                .query(&[
-                    ("since_seq", since_seq.to_string()),
-                    ("limit", limit.to_string()),
-                    ("reader", my_address.to_string()),
-                    ("auto_ack", auto_ack.to_string()),
-                ])
+                .get(format!("{base}/api/v2/threads/{thread_id}/messages"))
+                .query(&query_params)
                 .send()
                 .await?;
             if resp.status() == reqwest::StatusCode::FORBIDDEN {
-                let err_msg = resp
-                    .text()
-                    .await
-                    .unwrap_or_else(|_| "Access denied: not authorized to read private DM".to_string());
-                return Err(anyhow!("FORBIDDEN: {err_msg}"));
+                return Err(anyhow!("FORBIDDEN: Access denied: not authorized to read private DM"));
+            }
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                return Err(anyhow!("Read thread failed ({status}): {msg}"));
             }
             let v: Value = resp.json().await?;
+            Ok(v)
+        }
+        "resolve_message" => {
+            let thread_id = req_str(args, "thread_id")?;
+            let seq = args
+                .get("seq")
+                .and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow!("missing required integer parameter `seq`"))?;
+            let status = req_str(args, "status")?;
+            let resp = client
+                .patch(format!("{base}/api/threads/{thread_id}/messages/{seq}/status"))
+                .json(&json!({ "status": status, "updated_by": my_address }))
+                .send()
+                .await?;
+            if !resp.status().is_success() {
+                let code = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                return Err(anyhow!("Resolve message failed ({code}): {msg}"));
+            }
+            let v: Value = resp.json().await?;
+            Ok(v)
+        }
+        "set_thread_brief" => {
+            let thread_id = req_str(args, "thread_id")?;
+            let brief = req_str(args, "brief")?;
+            let resp = client
+                .put(format!("{base}/api/threads/{thread_id}/brief"))
+                .json(&json!({ "brief": brief, "updated_by": my_address }))
+                .send()
+                .await?;
+            if !resp.status().is_success() {
+                let code = resp.status();
+                let msg = resp.text().await.unwrap_or_default();
+                return Err(anyhow!("Set brief failed ({code}): {msg}"));
+            }
+            let v: Value = resp.json().await?;
+            Ok(v)
+        }
+        "update_profile" => {
+            let mut body = json!({});
+            if let Some(bio) = args.get("bio") {
+                body["bio"] = bio.clone();
+            }
+            if let Some(caps) = args.get("capabilities") {
+                body["capabilities"] = caps.clone();
+            }
+            if let Some(eph) = args.get("ephemeral") {
+                body["ephemeral"] = eph.clone();
+            }
+            let v: Value = client
+                .patch(format!("{base}/api/agents/{my_address}/profile"))
+                .json(&body)
+                .send()
+                .await?
+                .json()
+                .await?;
+            Ok(v)
+        }
+        "find_agents" => {
+            let mut query_params: Vec<(&str, String)> = Vec::new();
+            if let Some(cap) = args.get("capability").and_then(|v| v.as_str()) {
+                query_params.push(("capability", cap.to_string()));
+            }
+            if let Some(rt) = args.get("runtime").and_then(|v| v.as_str()) {
+                query_params.push(("runtime", rt.to_string()));
+            }
+            let v: Value = client
+                .get(format!("{base}/api/agents/search"))
+                .query(&query_params)
+                .send()
+                .await?
+                .json()
+                .await?;
             Ok(v)
         }
         "subscribe" => {
@@ -662,18 +758,18 @@ fn req_str(args: &Value, key: &str) -> Result<String> {
 }
 
 pub fn tool_definitions() -> Value {
-    json!([
-        {
+    let mut tools = vec![
+        json!({
             "name": "whoami",
             "description": "Return this agent's registered coommunity address and local viewer URL.",
             "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
+        }),
+        json!({
             "name": "list_agents",
-            "description": "List all registered agents (Claude Code, Claude Desktop, Codex, Antigravity), their addresses, working directories, statuses, and delivery transports.",
+            "description": "List all registered agents (Claude Code, Claude Desktop, Codex, Antigravity, Boss), their addresses, working directories, statuses, and delivery transports.",
             "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
+        }),
+        json!({
             "name": "set_status",
             "description": "Update this agent's presence status (online, busy, idle, offline).",
             "inputSchema": {
@@ -683,21 +779,8 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["status"]
             }
-        },
-        {
-            "name": "dm",
-            "description": "Send a direct message to another agent's address (e.g. `cc:backend`, `codex:tests`, `agy:research`).",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "to": { "type": "string", "description": "Target agent address from list_agents" },
-                    "body": { "type": "string", "description": "Message text" },
-                    "ack_only": { "type": "boolean", "description": "If true, tells the recipient no reply is needed" }
-                },
-                "required": ["to", "body"]
-            }
-        },
-        {
+        }),
+        json!({
             "name": "create_thread",
             "description": "Create a multi-agent forum thread and subscribe initial members.",
             "inputSchema": {
@@ -711,41 +794,8 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["title"]
             }
-        },
-        {
-            "name": "list_threads",
-            "description": "List all DM and forum threads on the hub.",
-            "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
-            "name": "post",
-            "description": "Post a message to a forum or DM thread. Include @agent:name or @codex/@cc/@agy in body or mentions array to notify agents via unread reminders.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "thread_id": { "type": "string" },
-                    "body": { "type": "string" },
-                    "mentions": { "type": "array", "items": { "type": "string" } },
-                    "ack_only": { "type": "boolean", "description": "Mark as informational so recipients don't feel forced to reply" }
-                },
-                "required": ["thread_id", "body"]
-            }
-        },
-        {
-            "name": "read_thread",
-            "description": "Read messages in a thread after an optional sequence number. Automatically marks the returned messages as read unless auto_ack is false.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "thread_id": { "type": "string" },
-                    "since_seq": { "type": "integer", "default": 0 },
-                    "limit": { "type": "integer", "default": 50 },
-                    "auto_ack": { "type": "boolean", "default": true, "description": "Automatically advance read cursor to the latest returned message" }
-                },
-                "required": ["thread_id"]
-            }
-        },
-        {
+        }),
+        json!({
             "name": "subscribe",
             "description": "Subscribe this agent to a forum thread with a notification mode (mentions, digest, all, muted).",
             "inputSchema": {
@@ -756,8 +806,8 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["thread_id"]
             }
-        },
-        {
+        }),
+        json!({
             "name": "unsubscribe",
             "description": "Unsubscribe this agent from a forum thread.",
             "inputSchema": {
@@ -765,13 +815,13 @@ pub fn tool_definitions() -> Value {
                 "properties": { "thread_id": { "type": "string" } },
                 "required": ["thread_id"]
             }
-        },
-        {
+        }),
+        json!({
             "name": "check_inbox",
             "description": "Check unread DMs and forum @mentions/updates for this agent.",
             "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
+        }),
+        json!({
             "name": "ack_inbox",
             "description": "Mark a specific thread read up to a given message sequence number.",
             "inputSchema": {
@@ -782,13 +832,13 @@ pub fn tool_definitions() -> Value {
                 },
                 "required": ["thread_id", "up_to_seq"]
             }
-        },
-        {
+        }),
+        json!({
             "name": "ack_all_inbox",
             "description": "Mark all subscribed threads read for this agent to clear all unread hook reminders.",
             "inputSchema": { "type": "object", "properties": {} }
-        },
-        {
+        }),
+        json!({
             "name": "wait_for_message",
             "description": "Block and wait for an incoming direct message or forum mention without busy-polling. Returns immediately when a message is received or when timeout expires.",
             "inputSchema": {
@@ -801,8 +851,10 @@ pub fn tool_definitions() -> Value {
                     }
                 }
             }
-        }
-    ])
+        }),
+    ];
+    tools.extend(crate::v2_mcp::v2_mcp_tool_definitions());
+    Value::Array(tools)
 }
 
 pub fn resource_definitions() -> Vec<Value> {

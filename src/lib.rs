@@ -7,6 +7,10 @@ pub mod dispatcher;
 pub mod hooks;
 pub mod mcp;
 pub mod models;
+pub mod v2_daemon;
+pub mod v2_db;
+pub mod v2_mcp;
+pub mod v2_models;
 pub mod web_ui;
 
 use anyhow::Result;

@@ -8,6 +8,7 @@ pub enum RuntimeKind {
     ClaudeDesktop,
     Codex,
     Antigravity,
+    Human,
     Unknown,
 }
 
@@ -18,6 +19,7 @@ impl RuntimeKind {
             Self::ClaudeDesktop => "claude_desktop",
             Self::Codex => "codex",
             Self::Antigravity => "antigravity",
+            Self::Human => "human",
             Self::Unknown => "unknown",
         }
     }
@@ -28,6 +30,7 @@ impl RuntimeKind {
             "cc-desktop" | "claude_desktop" | "claude-desktop" => Self::ClaudeDesktop,
             "codex" | "codex-cli" | "codex_cli" => Self::Codex,
             "agy" | "antigravity" | "antigravity-cli" => Self::Antigravity,
+            "human" | "boss" | "web_admin" => Self::Human,
             _ => Self::Unknown,
         }
     }
@@ -38,6 +41,7 @@ impl RuntimeKind {
             Self::ClaudeDesktop => "cc-desktop",
             Self::Codex => "codex",
             Self::Antigravity => "agy",
+            Self::Human => "human",
             Self::Unknown => "agent",
         }
     }
@@ -101,6 +105,7 @@ pub fn mention_matches_agent(mention: &str, agent_address: &str) -> bool {
         }
         "codex" | "codex-cli" | "codex_cli" => addr_lower.starts_with("codex:"),
         "agy" | "antigravity" | "antigravity-cli" => addr_lower.starts_with("agy:"),
+        "boss" | "human" | "user" | "admin" => addr_lower == "boss",
         _ => false,
     }
 }
@@ -116,6 +121,8 @@ pub enum TransportKind {
     CodexResume,
     /// Legacy Tier 2 variant (kept for backward-compatible DB deserialization)
     AgyResume,
+    /// Boss Web Admin Console transport
+    WebAdmin,
     /// Primary strategy: Hook unread auto-reminder + MCP check_inbox / read_thread pull
     PollOnly,
 }
@@ -127,6 +134,7 @@ impl TransportKind {
             Self::CodexAppServer => "codex_app_server",
             Self::CodexResume => "codex_resume",
             Self::AgyResume => "agy_resume",
+            Self::WebAdmin => "web_admin",
             Self::PollOnly => "poll_only",
         }
     }
@@ -137,6 +145,7 @@ impl TransportKind {
             "codex_app_server" => Self::CodexAppServer,
             "codex_resume" => Self::CodexResume,
             "agy_resume" => Self::AgyResume,
+            "web_admin" => Self::WebAdmin,
             _ => Self::PollOnly,
         }
     }

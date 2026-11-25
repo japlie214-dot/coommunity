@@ -119,7 +119,34 @@ fn test_mcp_resource_catalog_definitions() {
 fn test_wait_for_message_tool_definition() {
     let tools = coommunity::mcp::tool_definitions();
     let tools_arr = tools.as_array().expect("tools must be array");
-    assert_eq!(tools_arr.len(), 14);
+    assert_eq!(tools_arr.len(), 18);
+
+    let names: Vec<&str> = tools_arr
+        .iter()
+        .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+        .collect();
+    for expected in [
+        "whoami",
+        "list_agents",
+        "set_status",
+        "dm",
+        "create_thread",
+        "list_threads",
+        "post",
+        "read_thread",
+        "subscribe",
+        "unsubscribe",
+        "check_inbox",
+        "ack_inbox",
+        "ack_all_inbox",
+        "wait_for_message",
+        "resolve_message",
+        "set_thread_brief",
+        "update_profile",
+        "find_agents",
+    ] {
+        assert!(names.contains(&expected), "missing MCP tool: {expected}");
+    }
 
     let wait_tool = tools_arr
         .iter()
@@ -128,6 +155,15 @@ fn test_wait_for_message_tool_definition() {
 
     let schema = wait_tool.get("inputSchema").expect("inputSchema required");
     assert!(schema["properties"]["timeout_secs"].is_object());
+
+    let read_tool = tools_arr
+        .iter()
+        .find(|t| t.get("name").and_then(|n| n.as_str()) == Some("read_thread"))
+        .expect("read_thread tool must be defined");
+    let read_props = &read_tool["inputSchema"]["properties"];
+    assert!(read_props["before_seq"].is_object());
+    assert!(read_props["since_seq"].is_object());
+    assert!(read_props["limit"].is_object());
 
     let ack_all_tool = tools_arr
         .iter()

@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Result};
 use axum::{
-    extract::{Path, Query, Request, State},
+    extract::{Path, Query, State},
     http::{header, HeaderValue, Method, StatusCode},
-    middleware::{self, Next},
+    middleware,
     response::{
         sse::{Event, KeepAlive, Sse},
-        Html, IntoResponse, Response,
+        Html, IntoResponse,
     },
     routing::{delete, get, post},
     Json, Router,
@@ -70,8 +70,25 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
     ];
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::list(allowed_origins))
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers([header::AUTHORIZATION, header::CONTENT_TYPE]);
+
+    let v2_state = crate::v2_daemon::V2State {
+        db: state.db.clone(),
+        conn: state.db.conn_arc(),
+        dispatcher: state.dispatcher.clone(),
+        events: state.events.clone(),
+        api_token: state.api_token.clone(),
+        default_max_hops: state.cfg.default_max_hops,
+    };
+    crate::v2_daemon::spawn_archive_sweeper(v2_state.conn.clone());
 
     let app = Router::new()
         // Read-only local web viewer
@@ -101,9 +118,13 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         // Global Controls
         .route("/api/hub/pause", post(pause_hub))
         .route("/api/hub/resume", post(resume_hub))
-        .layer(middleware::from_fn_with_state(state.clone(), require_local_auth))
-        .layer(cors)
-        .with_state(state);
+        .with_state(state)
+        .merge(crate::v2_daemon::v2_router(v2_state.clone()))
+        .layer(middleware::from_fn_with_state(
+            v2_state,
+            crate::v2_daemon::require_local_auth_v2,
+        ))
+        .layer(cors);
 
     let addr = format!("{}:{}", cfg.host, cfg.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -118,51 +139,6 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         .await?;
     info!("coom daemon shut down cleanly");
     Ok(())
-}
-
-/// Requires `Authorization: Bearer <token>` on all mutating endpoints and private inbox reads,
-/// while keeping the local read-only web viewer routes (`/`, `/api/health`, `/api/snapshot`,
-/// `/api/events`, and read-only `GET` thread listings) accessible to localhost browsers.
-async fn require_local_auth(
-    State(st): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
-    let method = req.method().clone();
-    let path = req.uri().path();
-    let query = req.uri().query().unwrap_or("");
-
-    let is_public_readonly = method == Method::GET
-        && (path == "/"
-            || path == "/api/health"
-            || path == "/api/snapshot"
-            || path == "/api/events"
-            || path == "/api/agents"
-            || path == "/api/threads"
-            || (path.starts_with("/api/threads/")
-                && (path.ends_with("/subscriptions")
-                    || (path.ends_with("/messages") && !query.contains("reader=")))));
-
-    if is_public_readonly || method == Method::OPTIONS {
-        return next.run(req).await;
-    }
-
-    let provided = req
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.strip_prefix("Bearer "))
-        .map(str::trim);
-
-    if provided == Some(st.api_token.as_str()) {
-        next.run(req).await
-    } else {
-        (
-            StatusCode::UNAUTHORIZED,
-            "missing or invalid local bearer token (see ~/.coommunity/token)",
-        )
-            .into_response()
-    }
 }
 
 async fn shutdown_signal() {
