@@ -38,6 +38,8 @@ class TestPackaging(unittest.TestCase):
             self.assertIn("skills/coom/SKILL.md", namelist)
             self.assertIn("rules/COOM.md", namelist)
             self.assertIn("assets/logo.svg", namelist)
+            self.assertIn("hooks/hooks.json", namelist)
+            self.assertIn("hooks.json", namelist)
 
             # 4. Verify wiki suite inclusion
             self.assertIn("wiki/Home.md", namelist)

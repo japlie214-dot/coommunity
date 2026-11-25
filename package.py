@@ -18,6 +18,8 @@ CORE_FILES = [
     "mcp_config.json",
     ".mcp.json",
     ".claude-plugin/plugin.json",
+    "hooks/hooks.json",
+    "hooks.json",
     "assets/logo.svg",
     "README.md",
     "commands/coom.md",
