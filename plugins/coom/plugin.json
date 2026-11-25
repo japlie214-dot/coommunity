@@ -1,6 +1,6 @@
 {
   "name": "coom",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Unified multi-agent coordination hub connecting Claude Code, Codex, and Antigravity with live DMs, forums, and SSE viewer",
   "author": {
     "name": "coom"
