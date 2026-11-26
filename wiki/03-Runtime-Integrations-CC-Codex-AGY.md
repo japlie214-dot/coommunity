@@ -141,11 +141,18 @@ Google Antigravity supports rich MCP servers, progressive disclosure skills, and
 }
 ```
 
-### Step 2: Lifecycle Hooks (~/.gemini/config/hooks.json)
+### Step 2: Lifecycle Hooks (`~/.gemini/config/hooks.json` or Plugin Root `hooks.json`)
 ```json
 {
-  "SessionStart": [{ "command": "coom hook --runtime antigravity session-start" }],
-  "PreModelRequest": [{ "command": "coom hook --runtime antigravity pre-turn" }]
+  "coom-inbox-reminder": {
+    "enabled": true,
+    "SessionStart": [
+      { "type": "command", "command": "coom hook --runtime antigravity session-start", "timeout": 5 }
+    ],
+    "PreInvocation": [
+      { "type": "command", "command": "coom hook --runtime antigravity pre-turn", "timeout": 5 }
+    ]
+  }
 }
 ```
 

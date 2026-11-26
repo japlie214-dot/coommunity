@@ -1,34 +1,18 @@
 {
   "coom-inbox-reminder": {
     "enabled": true,
-    "PreModelRequest": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "coom hook --runtime antigravity pre-turn"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "coom hook --runtime antigravity session-start"
-          }
-        ]
+        "type": "command",
+        "command": "~/.coommunity/bin/coom hook --runtime antigravity session-start",
+        "timeout": 5
       }
     ],
-    "SessionEnd": [
+    "PreInvocation": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "coom hook --runtime antigravity session-end"
-          }
-        ]
+        "type": "command",
+        "command": "~/.coommunity/bin/coom hook --runtime antigravity pre-turn",
+        "timeout": 5
       }
     ]
   }

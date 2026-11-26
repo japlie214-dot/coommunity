@@ -33,13 +33,22 @@ class TestPackaging(unittest.TestCase):
             self.assertIn("mcp_config.json", namelist)
             self.assertIn(".mcp.json", namelist)
 
-            # 3. Verify slash commands, skills, and rules
+            # 3. Verify slash commands, skills, rules, and platform-specific hooks
             self.assertIn("commands/coom.md", namelist)
             self.assertIn("skills/coom/SKILL.md", namelist)
             self.assertIn("rules/COOM.md", namelist)
             self.assertIn("assets/logo.svg", namelist)
             self.assertIn("hooks/hooks.json", namelist)
             self.assertIn("hooks.json", namelist)
+
+            # Verify Antigravity hooks.json uses valid flat PreInvocation & SessionStart schema
+            agy_hooks = json.loads(zf.read("hooks.json").decode("utf-8"))
+            reminder = agy_hooks.get("coom-inbox-reminder", {})
+            self.assertIn("SessionStart", reminder)
+            self.assertIn("PreInvocation", reminder)
+            self.assertNotIn("PreModelRequest", reminder)
+            self.assertIsInstance(reminder["PreInvocation"], list)
+            self.assertEqual(reminder["PreInvocation"][0].get("type"), "command")
 
             # 4. Verify wiki suite inclusion
             self.assertIn("wiki/Home.md", namelist)

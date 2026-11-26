@@ -261,3 +261,55 @@ fn test_claude_desktop_active_session_file_scanning() {
 
     let _ = fs::remove_dir_all(&temp_root);
 }
+
+#[test]
+fn test_antigravity_hook_payload_and_json_contract() {
+    use coommunity::hooks::{extract_hook_cwd, extract_hook_session_id, format_unread_reminder};
+    use coommunity::models::{InboxItem, ThreadKind};
+    use serde_json::{json, Value};
+
+    // CamelCase Antigravity stdin payload with workspacePaths (distinct from hook cwd!)
+    let agy_stdin = json!({
+        "conversationId": "conv-abc-123",
+        "workspacePaths": ["C:\\Projects\\kanbanBoard-claude"],
+        "hookEventName": "PreInvocation",
+        "modelName": "auto"
+    });
+    assert_eq!(extract_hook_session_id(&agy_stdin).as_deref(), Some("conv-abc-123"));
+    assert_eq!(
+        extract_hook_cwd(&agy_stdin).as_deref(),
+        Some("C:\\Projects\\kanbanBoard-claude")
+    );
+
+    // Negative discriminator: 0 unread for antigravity MUST emit valid "{}" JSON (never empty or prose)
+    let empty_out = format_unread_reminder("antigravity", "agy:kanbanboard-claude", &[]);
+    let empty_parsed: Value =
+        serde_json::from_str(&empty_out).expect("antigravity 0-unread must emit valid JSON");
+    assert_eq!(empty_parsed, json!({}));
+
+    // Positive: unread DM for antigravity emits injectSteps -> systemMessage JSON envelope
+    let items = vec![InboxItem {
+        thread_id: "dm:agy-kanbanboard-claude:cc-memberberries".to_string(),
+        thread_title: "agy:kanbanboard-claude <-> cc:memberberries".to_string(),
+        thread_kind: ThreadKind::Dm,
+        unread_count: 1,
+        mentioned_count: 1,
+        latest_seq: 1,
+        latest_sender: "cc:memberberries".to_string(),
+        latest_preview: "qa hook fix needed".to_string(),
+        latest_at: "2026-11-26T01:00:00Z".to_string(),
+    }];
+    let agy_out = format_unread_reminder("antigravity", "agy:kanbanboard-claude", &items);
+    let agy_parsed: Value =
+        serde_json::from_str(&agy_out).expect("antigravity unread must emit valid JSON");
+    let msg = agy_parsed["injectSteps"][0]["systemMessage"]["systemMessage"]
+        .as_str()
+        .expect("injectSteps[0].systemMessage.systemMessage must be string");
+    assert!(msg.contains("agy:kanbanboard-claude"));
+    assert!(msg.contains("cc:memberberries"));
+
+    // Claude Code preserves plain-text stdout (empty string when 0 unread, banner when unread)
+    assert_eq!(format_unread_reminder("claude_code", "cc:test", &[]), "");
+    let cc_out = format_unread_reminder("claude_code", "cc:test", &items);
+    assert!(cc_out.starts_with("[coom unread reminder for `cc:test`]"));
+}

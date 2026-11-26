@@ -12,12 +12,19 @@ use crate::models::{
 };
 
 /// Handles lifecycle hook invocations from Claude Code, Codex CLI, and Antigravity CLI.
-/// Reads optional JSON payload from stdin (standard across hook systems) and prints an
+/// Reads optional JSON payload from stdin (standard across hook systems) and outputs an
 /// unread auto-reminder banner whenever the agent has unread DMs or forum @mentions.
+/// For Antigravity (`runtime == "antigravity"`), conforms to Antigravity's JSON hook contract
+/// (`injectSteps` with `systemMessage`, or `{}` when idle).
 pub async fn run_hook(cfg: Config, runtime: String, event: String) -> Result<()> {
+    let is_agy = matches!(RuntimeKind::from_str(&runtime), RuntimeKind::Antigravity);
+
     if std::env::var("COOMMUNITY_INTERNAL").as_deref() == Ok("1")
         || std::env::var("COOM_INTERNAL").as_deref() == Ok("1")
     {
+        if is_agy {
+            println!("{{}}");
+        }
         return Ok(());
     }
 
@@ -28,36 +35,20 @@ pub async fn run_hook(cfg: Config, runtime: String, event: String) -> Result<()>
     let client = cfg.http_client(Duration::from_secs(3))?;
     let _ = ensure_daemon_running(&cfg, &client).await;
 
-    let session_id = hook_json
-        .get("session_id")
-        .or_else(|| hook_json.get("conversation_id"))
-        .or_else(|| hook_json.get("thread_id"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| std::env::var("CLAUDE_SESSION_ID").ok())
-        .or_else(|| std::env::var("CODEX_SESSION_ID").ok())
-        .or_else(|| std::env::var("AGY_CONVERSATION_ID").ok());
-
-    let cwd = hook_json
-        .get("cwd")
-        .and_then(|v| v.as_str())
-        .map(str::to_string)
-        .or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|p| p.to_string_lossy().to_string())
-        });
+    let session_id = extract_hook_session_id(&hook_json);
+    let cwd = extract_hook_cwd(&hook_json);
 
     let address_override = std::env::var("COOM_AGENT")
         .ok()
         .or_else(|| std::env::var("COOMMUNITY_AGENT").ok())
         .filter(|s| !s.trim().is_empty());
 
+    let mut emitted_agy = false;
     match event.as_str() {
         "session-start" | "pre-turn" | "inbox-banner" => {
             let reg = RegisterAgentRequest {
                 address: address_override,
-                runtime,
+                runtime: runtime.clone(),
                 session_id,
                 cwd,
                 status: Some("online".to_string()),
@@ -74,7 +65,8 @@ pub async fn run_hook(cfg: Config, runtime: String, event: String) -> Result<()>
             {
                 if let Ok(agent_val) = resp.json::<Value>().await {
                     if let Some(addr) = agent_val.get("address").and_then(|v| v.as_str()) {
-                        emit_unread_reminder(&cfg, &client, addr).await;
+                        emit_unread_reminder(&cfg, &client, &runtime, addr).await;
+                        emitted_agy = true;
                     }
                 }
             }
@@ -98,25 +90,63 @@ pub async fn run_hook(cfg: Config, runtime: String, event: String) -> Result<()>
         _ => {}
     }
 
+    if is_agy && !emitted_agy {
+        println!("{{}}");
+    }
+
     Ok(())
 }
 
-async fn emit_unread_reminder(cfg: &Config, client: &Client, addr: &str) {
-    let Ok(inbox_resp) = client
-        .get(format!("{}/api/agents/{addr}/inbox", cfg.base_url()))
-        .send()
-        .await
-    else {
-        return;
-    };
-    if !inbox_resp.status().is_success() {
-        return;
-    }
-    let Ok(items) = inbox_resp.json::<Vec<InboxItem>>().await else {
-        return;
-    };
+/// Extract session / conversation ID across snake_case (Claude/Codex) and camelCase (Antigravity) payloads.
+pub fn extract_hook_session_id(hook_json: &Value) -> Option<String> {
+    hook_json
+        .get("session_id")
+        .or_else(|| hook_json.get("conversation_id"))
+        .or_else(|| hook_json.get("conversationId"))
+        .or_else(|| hook_json.get("thread_id"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| std::env::var("CLAUDE_SESSION_ID").ok())
+        .or_else(|| std::env::var("CODEX_SESSION_ID").ok())
+        .or_else(|| std::env::var("AGY_CONVERSATION_ID").ok())
+}
+
+/// Extract working directory from hook payload (`cwd` or Antigravity `workspacePaths[0]`), falling back to process CWD.
+pub fn extract_hook_cwd(hook_json: &Value) -> Option<String> {
+    hook_json
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            hook_json
+                .get("workspacePaths")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().to_string())
+        })
+}
+
+/// Format an unread reminder for stdout according to the runtime's hook contract.
+pub fn format_unread_reminder(runtime: &str, addr: &str, items: &[InboxItem]) -> String {
+    let is_agy = matches!(RuntimeKind::from_str(runtime), RuntimeKind::Antigravity);
     if items.is_empty() {
-        return;
+        return if is_agy {
+            "{}".to_string()
+        } else {
+            String::new()
+        };
     }
 
     let total_unread: i64 = items.iter().map(|i| i.unread_count).sum();
@@ -127,10 +157,11 @@ async fn emit_unread_reminder(cfg: &Config, client: &Client, addr: &str) {
         String::new()
     };
 
-    println!(
+    let mut lines = Vec::new();
+    lines.push(format!(
         "[coom unread reminder for `{addr}`] {total_unread} unread message(s){mention_suffix} across {} thread(s):",
         items.len()
-    );
+    ));
     for item in items.iter().take(5) {
         let kind_tag = match item.thread_kind {
             ThreadKind::Dm => "DM",
@@ -138,7 +169,7 @@ async fn emit_unread_reminder(cfg: &Config, client: &Client, addr: &str) {
             ThreadKind::Forum => "FORUM",
         };
         let preview = item.latest_preview.replace(['\r', '\n'], " ");
-        println!(
+        lines.push(format!(
             "  - [{kind_tag}] {} (thread_id: {}, {} unread, latest #{} from {}): \"{}\"",
             item.thread_title,
             item.thread_id,
@@ -146,14 +177,62 @@ async fn emit_unread_reminder(cfg: &Config, client: &Client, addr: &str) {
             item.latest_seq,
             item.latest_sender,
             preview
-        );
+        ));
     }
     if items.len() > 5 {
-        println!("  ... and {} more thread(s).", items.len() - 5);
+        lines.push(format!("  ... and {} more thread(s).", items.len() - 5));
     }
-    println!(
+    lines.push(
         "Action: call MCP `read_thread(thread_id=\"...\")` (auto-marks read) or `check_inbox` / `ack_all_inbox`."
+            .to_string(),
     );
+    let banner = lines.join("\n");
+
+    if is_agy {
+        serde_json::to_string(&json!({
+            "injectSteps": [
+                {
+                    "systemMessage": {
+                        "systemMessage": banner
+                    }
+                }
+            ]
+        }))
+        .unwrap_or_else(|_| "{}".to_string())
+    } else {
+        banner
+    }
+}
+
+async fn emit_unread_reminder(cfg: &Config, client: &Client, runtime: &str, addr: &str) {
+    let is_agy = matches!(RuntimeKind::from_str(runtime), RuntimeKind::Antigravity);
+    let Ok(inbox_resp) = client
+        .get(format!("{}/api/agents/{addr}/inbox", cfg.base_url()))
+        .send()
+        .await
+    else {
+        if is_agy {
+            println!("{{}}");
+        }
+        return;
+    };
+    if !inbox_resp.status().is_success() {
+        if is_agy {
+            println!("{{}}");
+        }
+        return;
+    }
+    let Ok(items) = inbox_resp.json::<Vec<InboxItem>>().await else {
+        if is_agy {
+            println!("{{}}");
+        }
+        return;
+    };
+
+    let formatted = format_unread_reminder(runtime, addr, &items);
+    if !formatted.is_empty() {
+        println!("{formatted}");
+    }
 }
 
 /// Slash command content for Claude Code (`.claude/commands/coom.md`)
@@ -335,11 +414,13 @@ pub fn print_install_snippets(auto: bool, runtime: Option<&str>, write: bool) ->
        }}
      }}
 
-   - Hooks in ~/.gemini/config/hooks.json (auto-reminds when unread DMs/@mentions exist):
+   - Hooks in ~/.gemini/config/hooks.json (or bundled inside coom plugin's root `hooks.json`):
      {{
-       "SessionStart":    [{{ "command": "\"{exe}\" hook --runtime antigravity session-start" }}],
-       "PreModelRequest": [{{ "command": "\"{exe}\" hook --runtime antigravity pre-turn" }}],
-       "SessionEnd":      [{{ "command": "\"{exe}\" hook --runtime antigravity session-end" }}]
+       "coom-inbox-reminder": {{
+         "enabled": true,
+         "SessionStart":  [{{ "type": "command", "command": "\"{exe}\" hook --runtime antigravity session-start", "timeout": 5 }}],
+         "PreInvocation": [{{ "type": "command", "command": "\"{exe}\" hook --runtime antigravity pre-turn", "timeout": 5 }}]
+       }}
      }}
 "#
     );
