@@ -10,7 +10,8 @@
 //!   2. `GET /api/events` (SSE) now requires bearer auth (`Authorization: Bearer` or `?token=`) so live DM
 //!      messages cannot leak to unauthenticated listeners.
 
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use axum::{
@@ -31,8 +32,9 @@ use crate::dispatcher::Dispatcher;
 use crate::models::{HubEvent, Message, Thread, ThreadKind};
 use crate::v2_db;
 use crate::v2_models::{
-    PostMessageV2Request, PostMessageV2Response, ThreadBriefRequest, UpdateAgentProfileRequest,
-    UpdateMessageStatusRequest, BOSS_ADDRESS, DEFAULT_ARCHIVE_DAYS,
+    PostMessageV2Request, PostMessageV2Response, ThreadBriefRequest, TokenUpdateRequest,
+    TokenUpdateResponse, UpdateAgentProfileRequest, UpdateMessageStatusRequest, BOSS_ADDRESS,
+    DEFAULT_ARCHIVE_DAYS,
 };
 
 /// Shared lightweight handle for v2 routes.
@@ -42,11 +44,12 @@ pub struct V2State {
     pub conn: Arc<Mutex<Connection>>,
     pub dispatcher: Dispatcher,
     pub events: broadcast::Sender<HubEvent>,
-    pub api_token: String,
+    pub api_token: Arc<RwLock<String>>,
+    pub token_path: Option<PathBuf>,
     pub default_max_hops: i64,
 }
 
-/// Hardened local auth middleware for v2.0.
+/// Hardened local auth middleware for v2.
 /// Public unauthenticated allowlist is strictly limited to `/` (HTML shell) and `/api/health`.
 /// All `/api/admin/*`, `/api/events`, and `reader=` queries require the local bearer token
 /// (passed via `Authorization: Bearer <token>` header or `?token=<token>` for browser `EventSource`).
@@ -62,8 +65,14 @@ pub async fn require_local_auth_v2(
         return Ok(next.run(req).await);
     }
 
+    let expected = st
+        .api_token
+        .read()
+        .map(|g| g.clone())
+        .unwrap_or_default();
+
     if extract_bearer_or_query_token(req.headers(), req.uri().query())
-        .map(|t| t == st.api_token)
+        .map(|t| !expected.is_empty() && t == expected)
         .unwrap_or(false)
     {
         return Ok(next.run(req).await);
@@ -106,6 +115,8 @@ pub struct SearchAgentsQuery {
 pub struct ThreadsPageQuery {
     pub reader: Option<String>,
     pub kind: Option<String>,
+    pub filter: Option<String>,
+    pub sort: Option<String>,
     pub q: Option<String>,
     pub before_updated_at: Option<String>,
     pub limit: Option<usize>,
@@ -116,6 +127,11 @@ pub struct MessagesPageQuery {
     pub reader: Option<String>,
     pub before_seq: Option<i64>,
     pub since_seq: Option<i64>,
+    pub limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+pub struct DeliveriesQuery {
     pub limit: Option<usize>,
 }
 
@@ -157,6 +173,8 @@ pub fn v2_router(state: V2State) -> Router {
     Router::new()
         // Admin God-Mode Visibility (Boss sees all forums, all DMs, and every agent inbox)
         .route("/api/admin/overview", get(admin_overview_handler))
+        .route("/api/admin/deliveries", get(admin_deliveries_handler))
+        .route("/api/admin/token", post(admin_update_token_handler))
         .route("/api/admin/agents", get(admin_list_agents_handler))
         .route("/api/admin/agents/archive-stale", post(admin_archive_stale_handler))
         .route("/api/admin/agents/:address/archive", post(admin_toggle_archive_handler))
@@ -208,6 +226,49 @@ async fn admin_overview_handler(
     Ok(Json(json!(res)))
 }
 
+async fn admin_deliveries_handler(
+    State(st): State<V2State>,
+    Query(q): Query<DeliveriesQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let conn = st.conn.clone();
+    let limit = q.limit.unwrap_or(50);
+    let res = tokio::task::spawn_blocking(move || {
+        let guard = conn.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        v2_db::list_recent_deliveries_v2(&guard, limit).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)??;
+    Ok(Json(json!({ "deliveries": res })))
+}
+
+async fn admin_update_token_handler(
+    State(st): State<V2State>,
+    Json(req): Json<TokenUpdateRequest>,
+) -> Result<Json<Value>, StatusCode> {
+    let next_token = match req.new_token.map(|s| s.trim().to_string()) {
+        Some(t) if t.len() >= 16 => t,
+        Some(t) if !t.is_empty() => return Err(StatusCode::BAD_REQUEST),
+        _ => format!("coom_{}", uuid::Uuid::new_v4().simple()),
+    };
+
+    if let Ok(mut guard) = st.api_token.write() {
+        *guard = next_token.clone();
+    } else {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let persisted = if let Some(path) = &st.token_path {
+        std::fs::write(path, format!("{}\n", next_token)).is_ok()
+    } else {
+        false
+    };
+
+    Ok(Json(json!(TokenUpdateResponse {
+        token: next_token,
+        persisted_to_disk: persisted,
+    })))
+}
+
 async fn admin_list_agents_handler(
     State(st): State<V2State>,
     Query(q): Query<AgentsQuery>,
@@ -252,6 +313,8 @@ async fn admin_list_threads_handler(
             Some(BOSS_ADDRESS),
             true, // Admin sees all forums + all DMs
             q.kind.as_deref(),
+            q.filter.as_deref(),
+            q.sort.as_deref(),
             q.q.as_deref(),
             q.before_updated_at.as_deref(),
             q.limit,
@@ -275,6 +338,8 @@ async fn agent_list_threads_handler(
             q.reader.as_deref(),
             false, // Agents only see forums + their own DMs
             q.kind.as_deref(),
+            q.filter.as_deref(),
+            q.sort.as_deref(),
             q.q.as_deref(),
             q.before_updated_at.as_deref(),
             q.limit,

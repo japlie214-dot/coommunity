@@ -219,11 +219,38 @@ fn test_v2_migrations_boss_pagination_handoffs_and_archival() {
     let dm_stale = db.get_or_create_dm_thread("cc:alice", "agy:stale-unread", 8).unwrap();
     db.post_message(&dm_stale.id, "cc:alice", "Don't archive me!", &[], false)
         .unwrap();
+    db.log_delivery("msg-delivery-1", &dm_stale.id, "agy:stale-unread", "tier3", "queued", None)
+        .unwrap();
 
     let conn = conn_arc.lock().unwrap();
     let report = v2_db::archive_stale_ephemeral_agents(&conn, Some(14)).unwrap();
     assert_eq!(report.archived_count, 1);
     assert_eq!(report.archived_agents, vec!["agy:stale-clean".to_string()]);
+
+    // 8. v2.1 fixes: Boss excluded from online_agents count, deliveries null-safe, timestamp ms & filter/sort
+    let ov = v2_db::admin_overview(&conn).unwrap();
+    assert_eq!(ov.online_agents, 1, "only cc:alice is online; Boss must be excluded");
+
+    let deliveries = v2_db::list_recent_deliveries_v2(&conn, 10).unwrap();
+    assert_eq!(deliveries.len(), 1);
+    assert!(deliveries[0].id > 0);
+    assert_eq!(deliveries[0].detail, None);
+
+    assert!(v2_db::parse_timestamp_ms("2026-11-25 14:00:00") > v2_db::parse_timestamp_ms("2026-11-25T13:00:00Z"));
+    let sorted_msgs = v2_db::list_threads_paginated(
+        &conn,
+        None,
+        true,
+        None,
+        None,
+        Some("messages"),
+        None,
+        None,
+        Some(20),
+    )
+    .unwrap();
+    assert!(sorted_msgs.threads.len() >= 2);
+    assert!(sorted_msgs.threads[0].message_count >= sorted_msgs.threads[1].message_count);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }
@@ -247,7 +274,8 @@ async fn test_v2_auth_hardening_and_admin_vs_agent_dm_isolation() {
         conn: db.conn_arc(),
         dispatcher,
         events,
-        api_token: token.clone(),
+        api_token: std::sync::Arc::new(std::sync::RwLock::new(token.clone())),
+        token_path: Some(cfg.token_path.clone()),
         default_max_hops: 8,
     };
 
@@ -358,6 +386,84 @@ async fn test_v2_auth_hardening_and_admin_vs_agent_dm_isolation() {
     assert_eq!(boss_dm.status(), 200);
     let boss_dm_json: Value = boss_dm.json().await.unwrap();
     assert_eq!(boss_dm_json["thread"]["id"], "dm:boss:cc-alice");
+
+    // Boss filter=boss_dm returns dm:boss:cc-alice and excludes agent-only DM
+    let boss_filtered: Value = client
+        .get(format!("{base}/api/admin/threads?filter=boss_dm"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(boss_filtered["total_count"], 1);
+    assert_eq!(boss_filtered["threads"][0]["id"], "dm:boss:cc-alice");
+
+    // Initial deliveries hydration endpoint works
+    db.log_delivery("msg-http-1", &dm.id, "codex:bob", "tier3", "queued_unread", None)
+        .unwrap();
+    let del_res = client
+        .get(format!("{base}/api/admin/deliveries?limit=50"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(del_res.status(), 200);
+    let del_json: Value = del_res.json().await.unwrap();
+    let dels = del_json["deliveries"].as_array().unwrap();
+    assert!(
+        dels.iter().any(|d| d["message_id"] == "msg-http-1"),
+        "expected msg-http-1 in hydrated deliveries: {dels:?}"
+    );
+
+    // Negative Discriminator 3: token rotation rejects short tokens (<16 chars) with 400
+    let short_rot = client
+        .post(format!("{base}/api/admin/token"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "new_token": "too-short" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(short_rot.status(), 400);
+
+    // Valid live token rotation updates memory + disk, invalidates old token (401), accepts new (200)
+    let new_token = "rotated-v21-token-0123456789abcdef";
+    let ok_rot = client
+        .post(format!("{base}/api/admin/token"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "new_token": new_token }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(ok_rot.status(), 200);
+    let rot_json: Value = ok_rot.json().await.unwrap();
+    assert_eq!(rot_json["token"], new_token);
+    assert_eq!(rot_json["persisted_to_disk"], true);
+    assert_eq!(
+        std::fs::read_to_string(&cfg.token_path).unwrap().trim(),
+        new_token
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/api/admin/overview"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    assert_eq!(
+        client
+            .get(format!("{base}/api/admin/overview"))
+            .bearer_auth(new_token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 }

@@ -140,6 +140,8 @@ pub struct ThreadV2 {
     pub created_by: String,
     pub created_at: String,
     pub updated_at: String,
+    /// Normalized UNIX epoch milliseconds for reliable sorting across mixed ISO formats.
+    pub updated_at_ms: i64,
     pub hop_count: i64,
     pub max_hops: i64,
     pub muted: bool,
@@ -181,6 +183,18 @@ pub struct MessageV2 {
     pub status: Option<MessageStatus>,
     pub reply_to_seq: Option<i64>,
     pub refs: Vec<MessageRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeliveryV2 {
+    pub id: i64,
+    pub message_id: String,
+    pub thread_id: String,
+    pub target_agent: String,
+    pub tier: String,
+    pub status: String,
+    pub detail: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,6 +301,7 @@ pub struct ArchiveReport {
 #[derive(Debug, Clone, Serialize)]
 pub struct AdminOverview {
     pub paused: bool,
+    /// Online AI agents (excludes permanent `Boss` human profile so count matches sidebar).
     pub online_agents: usize,
     pub offline_agents: usize,
     pub archived_agents: usize,
@@ -295,4 +310,16 @@ pub struct AdminOverview {
     pub total_messages: usize,
     pub boss_unread: usize,
     pub open_handoffs: usize,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct TokenUpdateRequest {
+    #[serde(default)]
+    pub new_token: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TokenUpdateResponse {
+    pub token: String,
+    pub persisted_to_disk: bool,
 }

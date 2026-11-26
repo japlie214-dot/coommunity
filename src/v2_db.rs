@@ -10,11 +10,11 @@
 
 use std::collections::HashSet;
 
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension, Result as SqlResult};
 
 use crate::v2_models::{
-    AdminOverview, AgentInboxItem, AgentInboxView, AgentV2, ArchiveReport,
+    AdminOverview, AgentInboxItem, AgentInboxView, AgentV2, ArchiveReport, DeliveryV2,
     MessageStatus, MessageType, MessageV2, PaginatedMessages, PaginatedThreads,
     PostMessageV2Request, PostMessageV2Response, SubscriptionV2, ThreadV2,
     UpdateAgentProfileRequest, BOSS_ADDRESS, DEFAULT_ARCHIVE_DAYS, DEFAULT_MESSAGE_PAGE_LIMIT,
@@ -23,6 +23,21 @@ use crate::v2_models::{
 
 fn now_iso() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// Robustly parse mixed RFC3339 and SQLite timestamps into UTC epoch milliseconds.
+pub fn parse_timestamp_ms(raw: &str) -> i64 {
+    let s = raw.trim();
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return dt.timestamp_millis();
+    }
+    if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return ndt.and_utc().timestamp_millis();
+    }
+    if let Ok(ndt) = NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
+        return ndt.and_utc().timestamp_millis();
+    }
+    0
 }
 
 fn has_column(conn: &Connection, table: &str, col: &str) -> SqlResult<bool> {
@@ -399,6 +414,8 @@ fn hydrate_thread_v2(conn: &Connection, row_id: &str) -> SqlResult<Option<Thread
              FROM threads WHERE id = ?1",
             params![row_id],
             |r| {
+                let updated_at: String = r.get(6)?;
+                let updated_at_ms = parse_timestamp_ms(&updated_at);
                 Ok(ThreadV2 {
                     id: r.get(0)?,
                     kind: r.get(1)?,
@@ -406,7 +423,8 @@ fn hydrate_thread_v2(conn: &Connection, row_id: &str) -> SqlResult<Option<Thread
                     description: r.get::<_, Option<String>>(3)?.unwrap_or_default(),
                     created_by: r.get(4)?,
                     created_at: r.get(5)?,
-                    updated_at: r.get(6)?,
+                    updated_at,
+                    updated_at_ms,
                     hop_count: r.get(7)?,
                     max_hops: r.get(8)?,
                     muted: r.get::<_, i64>(9)? != 0,
@@ -448,17 +466,22 @@ fn hydrate_thread_v2(conn: &Connection, row_id: &str) -> SqlResult<Option<Thread
         |r| r.get::<_, i64>(0),
     )? as usize;
 
-    if let Some((sender, body)) = conn
+    if let Some((sender, body, created_at)) = conn
         .query_row(
-            "SELECT sender, body FROM messages WHERE thread_id = ?1 ORDER BY seq DESC LIMIT 1",
+            "SELECT sender, body, created_at FROM messages WHERE thread_id = ?1 ORDER BY seq DESC LIMIT 1",
             params![t.id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
         )
         .optional()?
     {
         t.last_message_sender = Some(sender);
         let preview: String = body.chars().take(120).collect();
         t.last_message_preview = Some(preview);
+        let msg_ms = parse_timestamp_ms(&created_at);
+        if msg_ms > t.updated_at_ms {
+            t.updated_at_ms = msg_ms;
+            t.updated_at = created_at;
+        }
     }
 
     let mut pstmt = conn.prepare(
@@ -471,14 +494,16 @@ fn hydrate_thread_v2(conn: &Connection, row_id: &str) -> SqlResult<Option<Thread
     Ok(Some(t))
 }
 
-/// Paginated thread listing enforcing Admin visibility vs. Agent DM isolation.
-/// - `is_admin = true`: sees ALL forums and ALL DMs between any pair of agents.
-/// - `is_admin = false`: sees ALL forums + ONLY DMs where `reader` is a subscriber/participant.
+/// Paginated, filterable, sortable thread listing enforcing Admin visibility vs. Agent DM isolation.
+/// - `sort_by`: `"updated"` (default, newest first), `"messages"`, `"subscribers"`, `"open_handoffs"`, `"title"`
+/// - `extra_filter`: `"all"` (default), `"boss_dm"`, `"agent_dm"`, `"open"`, `"muted"`
 pub fn list_threads_paginated(
     conn: &Connection,
     reader: Option<&str>,
     is_admin: bool,
     kind_filter: Option<&str>,
+    extra_filter: Option<&str>,
+    sort_by: Option<&str>,
     query: Option<&str>,
     before_updated_at: Option<&str>,
     limit: Option<usize>,
@@ -487,31 +512,17 @@ pub fn list_threads_paginated(
         .unwrap_or(DEFAULT_THREAD_PAGE_LIMIT)
         .clamp(1, MAX_THREAD_PAGE_LIMIT);
 
-    // Fetch candidate thread IDs ordered by latest activity first.
-    let mut stmt = conn.prepare(
-        "SELECT t.id, t.kind, t.title, t.description, t.updated_at
-         FROM threads t
-         ORDER BY t.updated_at DESC, t.id DESC",
-    )?;
+    let mut stmt = conn.prepare("SELECT id, kind FROM threads")?;
+    let raw_ids = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        .collect::<SqlResult<Vec<_>>>()?;
 
     let search_q = query
         .map(|q| q.trim().to_ascii_lowercase())
         .filter(|q| !q.is_empty());
 
-    let mut matched_ids = Vec::new();
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, Option<String>>(3)?.unwrap_or_default(),
-            r.get::<_, String>(4)?,
-        ))
-    })?;
-
-    for row in rows {
-        let (id, kind, title, desc, updated_at) = row?;
-
+    let mut hydrated = Vec::new();
+    for (id, kind) in raw_ids {
         // 1. Visibility filter: hide DMs among other agents when not admin
         if kind == "dm" && !is_admin {
             let allowed = match reader {
@@ -537,47 +548,99 @@ pub fn list_threads_paginated(
             }
         }
 
-        // 3. Search filter
-        if let Some(q) = &search_q {
-            if !id.to_ascii_lowercase().contains(q)
-                && !title.to_ascii_lowercase().contains(q)
-                && !desc.to_ascii_lowercase().contains(q)
-            {
+        if let Some(t) = hydrate_thread_v2(conn, &id)? {
+            // 3. Extra filter (boss_dm, agent_dm, open, muted)
+            let is_boss_dm = t.kind == "dm"
+                && (t.participants.iter().any(|p| p.eq_ignore_ascii_case(BOSS_ADDRESS))
+                    || t.id.to_ascii_lowercase().contains("boss"));
+
+            let filter_ok = match extra_filter.unwrap_or("all") {
+                "boss_dm" => is_boss_dm,
+                "agent_dm" => t.kind == "dm" && !is_boss_dm,
+                "open" => t.open_action_count > 0,
+                "muted" => t.muted,
+                _ => true,
+            };
+            if !filter_ok {
                 continue;
             }
-        }
 
-        matched_ids.push((id, updated_at));
+            // 4. Search filter
+            if let Some(q) = &search_q {
+                let hay = format!(
+                    "{} {} {} {} {}",
+                    t.id,
+                    t.title,
+                    t.description,
+                    t.participants.join(" "),
+                    t.last_message_preview.as_deref().unwrap_or("")
+                )
+                .to_ascii_lowercase();
+                if !hay.contains(q) {
+                    continue;
+                }
+            }
+
+            hydrated.push(t);
+        }
     }
 
-    let total_count = matched_ids.len();
+    // 5. Sort (default: last updated descending using normalized epoch ms)
+    match sort_by.unwrap_or("updated") {
+        "messages" => hydrated.sort_by(|a, b| {
+            b.message_count
+                .cmp(&a.message_count)
+                .then_with(|| b.updated_at_ms.cmp(&a.updated_at_ms))
+        }),
+        "subscribers" => hydrated.sort_by(|a, b| {
+            b.subscriber_count
+                .cmp(&a.subscriber_count)
+                .then_with(|| b.updated_at_ms.cmp(&a.updated_at_ms))
+        }),
+        "open_handoffs" => hydrated.sort_by(|a, b| {
+            b.open_action_count
+                .cmp(&a.open_action_count)
+                .then_with(|| b.updated_at_ms.cmp(&a.updated_at_ms))
+        }),
+        "title" => hydrated.sort_by(|a, b| {
+            a.title
+                .to_ascii_lowercase()
+                .cmp(&b.title.to_ascii_lowercase())
+        }),
+        _ => hydrated.sort_by(|a, b| {
+            b.updated_at_ms
+                .cmp(&a.updated_at_ms)
+                .then_with(|| b.id.cmp(&a.id))
+        }),
+    }
 
-    // 4. Cursor slice (`before_updated_at`)
-    let filtered_by_cursor: Vec<(String, String)> = match before_updated_at {
-        Some(cursor) if !cursor.is_empty() => matched_ids
-            .into_iter()
-            .filter(|(_, ts)| ts.as_str() < cursor)
-            .collect(),
-        _ => matched_ids,
+    let total_count = hydrated.len();
+
+    // 6. Cursor slice (`before_updated_at`) for default `updated` sort
+    let sliced: Vec<ThreadV2> = match before_updated_at {
+        Some(cursor) if !cursor.is_empty() && sort_by.unwrap_or("updated") == "updated" => {
+            let cursor_ms = parse_timestamp_ms(cursor);
+            hydrated
+                .into_iter()
+                .filter(|t| t.updated_at_ms < cursor_ms)
+                .collect()
+        }
+        _ => hydrated,
     };
 
-    let has_more = filtered_by_cursor.len() > page_limit;
-    let page_slice = filtered_by_cursor.into_iter().take(page_limit);
-
-    let mut threads = Vec::new();
-    let mut next_cursor = None;
-    for (id, updated_at) in page_slice {
-        next_cursor = Some(updated_at);
-        if let Some(hydrated) = hydrate_thread_v2(conn, &id)? {
-            threads.push(hydrated);
-        }
-    }
+    let has_more = sliced.len() > page_limit;
+    let threads: Vec<ThreadV2> = sliced.into_iter().take(page_limit).collect();
+    let next_cursor = if has_more {
+        threads.last().map(|t| t.updated_at.clone())
+    } else {
+        None
+    };
 
     Ok(PaginatedThreads {
         threads,
         total_count,
         has_more,
-        next_cursor: if has_more { next_cursor } else { None },
+        next_cursor,
     })
 }
 
@@ -1029,6 +1092,29 @@ pub fn list_subscriptions_v2(conn: &Connection, thread_id: &str) -> SqlResult<Ve
     rows.collect()
 }
 
+pub fn list_recent_deliveries_v2(conn: &Connection, limit: usize) -> SqlResult<Vec<DeliveryV2>> {
+    let cap = limit.clamp(1, 200) as i64;
+    let mut stmt = conn.prepare(
+        "SELECT id, message_id, thread_id, target_agent, tier, status, detail, created_at
+         FROM deliveries
+         ORDER BY id DESC
+         LIMIT ?1",
+    )?;
+    let rows = stmt.query_map(params![cap], |r| {
+        Ok(DeliveryV2 {
+            id: r.get(0)?,
+            message_id: r.get(1)?,
+            thread_id: r.get(2)?,
+            target_agent: r.get(3)?,
+            tier: r.get(4)?,
+            status: r.get(5)?,
+            detail: r.get(6)?,
+            created_at: r.get(7)?,
+        })
+    })?;
+    rows.collect()
+}
+
 /// Inspect any agent's live unread inbox (including `Boss`).
 pub fn get_agent_inbox_v2(conn: &Connection, address: &str) -> SqlResult<Option<AgentInboxView>> {
     let resolved = resolve_agent_alias_v2(conn, address)?
@@ -1197,15 +1283,16 @@ pub fn admin_overview(conn: &Connection) -> SqlResult<AdminOverview> {
         .map(|v| v == "true")
         .unwrap_or(false);
 
+    // Exclude permanent Boss profile so online/offline counts match the AI Agents rail
     let online_agents = conn.query_row(
-        "SELECT COUNT(*) FROM agents WHERE archived = 0 AND status = 'online'",
-        [],
+        "SELECT COUNT(*) FROM agents WHERE archived = 0 AND status = 'online' AND address != ?1",
+        params![BOSS_ADDRESS],
         |r| r.get::<_, i64>(0),
     )? as usize;
 
     let offline_agents = conn.query_row(
-        "SELECT COUNT(*) FROM agents WHERE archived = 0 AND status != 'online'",
-        [],
+        "SELECT COUNT(*) FROM agents WHERE archived = 0 AND status != 'online' AND address != ?1",
+        params![BOSS_ADDRESS],
         |r| r.get::<_, i64>(0),
     )? as usize;
 

@@ -85,7 +85,8 @@ pub async fn run_daemon(cfg: Config) -> Result<()> {
         conn: state.db.conn_arc(),
         dispatcher: state.dispatcher.clone(),
         events: state.events.clone(),
-        api_token: state.api_token.clone(),
+        api_token: std::sync::Arc::new(std::sync::RwLock::new(state.api_token.clone())),
+        token_path: Some(state.cfg.token_path.clone()),
         default_max_hops: state.cfg.default_max_hops,
     };
     crate::v2_daemon::spawn_archive_sweeper(v2_state.conn.clone());

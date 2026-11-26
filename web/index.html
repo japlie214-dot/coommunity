@@ -3,118 +3,156 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>coommunity — Multi-Agent Hub & Boss Console</title>
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230B0F19'/%3E%3Cpath d='M49.5 16.5A23.5 23.5 0 1 0 49.5 47.5' stroke='%236366F1' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='22.5' cy='32' r='9.5' stroke='%23C7D2FE' stroke-width='4.8' fill='none'/%3E%3Ccircle cx='41.5' cy='32' r='9.5' stroke='%23A7F3D0' stroke-width='4.8' fill='none'/%3E%3Cpath d='M22.5 32H41.5' stroke='%2338BDF8' stroke-width='2'/%3E%3Ccircle cx='22.5' cy='32' r='3.4' fill='%236366F1'/%3E%3Ccircle cx='41.5' cy='32' r='3.4' fill='%2310B981'/%3E%3Ccircle cx='30' cy='15.5' r='3.2' fill='%2322D3EE'/%3E%3Ccircle cx='30' cy='48.5' r='3.2' fill='%2310B981'/%3E%3C/svg%3E" />
+<title>coommunity — Multi-agent dispatch console</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230E0F11'/%3E%3Cpath d='M49.5 16.5A23.5 23.5 0 1 0 49.5 47.5' stroke='%23E5A93C' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='22.5' cy='32' r='9.5' stroke='%23EDEDEF' stroke-width='4.6' fill='none'/%3E%3Ccircle cx='41.5' cy='32' r='9.5' stroke='%23A0A3AD' stroke-width='4.6' fill='none'/%3E%3Cpath d='M22.5 32H41.5' stroke='%23E5A93C' stroke-width='2'/%3E%3Ccircle cx='22.5' cy='32' r='3.2' fill='%23E5A93C'/%3E%3Ccircle cx='41.5' cy='32' r='3.2' fill='%235BB98C'/%3E%3C/svg%3E" />
 <style>
+  /*
+   * coommunity v2.1 — Warm-Graphite Dispatch Console
+   * Design system informed by unslop (Damir Sokolovsky, @heydamir, CC-BY-4.0):
+   * - Neutral graphite surface ramp, zero hue gradients or glows
+   * - Strict 4px spacing scale, nested radii, tabular-nums
+   * - Unified 16px 1.5-stroke line icons, zero emojis
+   * - Sentence case typography (400 / 500 / 600), quiet chrome
+   * - Dynamic deterministic agent identity colors matched across avatar + name
+   */
   :root {
-    --bg: #080c14;
-    --panel: #0e1422;
-    --panel-2: #131b2e;
-    --card: #162036;
-    --card-hover: #1b2844;
-    --border: rgba(148, 163, 184, 0.14);
-    --border-strong: rgba(148, 163, 184, 0.28);
-    --text: #f1f5f9;
-    --text-dim: #94a3b8;
-    --text-muted: #64748b;
-    --indigo: #6366f1;
-    --indigo-soft: rgba(99, 102, 241, 0.16);
-    --cyan: #22d3ee;
-    --cyan-soft: rgba(34, 211, 238, 0.14);
-    --emerald: #10b981;
-    --emerald-soft: rgba(16, 185, 129, 0.15);
-    --amber: #f59e0b;
-    --amber-soft: rgba(245, 158, 11, 0.16);
-    --rose: #f43f5e;
-    --rose-soft: rgba(244, 63, 94, 0.16);
-    --violet: #a855f7;
-    --violet-soft: rgba(168, 85, 247, 0.16);
-    --radius: 10px;
-    --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+    --bg: #0e0f11;
+    --panel: #141518;
+    --panel-2: #1a1c20;
+    --card: #202227;
+    --card-hover: #262930;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.15);
+
+    --text: #ededef;
+    --text-2: #a0a3ad;
+    --text-3: #6e717c;
+
+    --accent: #e5a93c;
+    --accent-soft: rgba(229, 169, 60, 0.12);
+    --accent-border: rgba(229, 169, 60, 0.34);
+
+    --ok: #5bb98c;
+    --ok-soft: rgba(91, 185, 140, 0.12);
+    --warn: #e5a93c;
+    --warn-soft: rgba(229, 169, 60, 0.12);
+    --err: #e06c75;
+    --err-soft: rgba(224, 108, 117, 0.13);
+    --info: #5ea8e6;
+    --info-soft: rgba(94, 168, 230, 0.12);
+
+    --r-panel: 12px;
+    --r-card: 10px;
+    --r-ctrl: 8px;
+    --r-tag: 6px;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", Roboto, sans-serif;
+    --font-mono: "JetBrains Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+    --ease: 140ms cubic-bezier(0.2, 0, 0, 1);
   }
 
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; height: 100%; overflow: hidden;
     background: var(--bg); color: var(--text);
-    font-family: var(--font-sans); font-size: 13.5px; line-height: 1.45;
+    font-family: var(--font-sans); font-size: 13.5px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* Scrollbars */
+  .num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
   ::-webkit-scrollbar { width: 6px; height: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.22); border-radius: 3px; }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.38); }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
 
-  /* App Shell */
-  .app { display: grid; grid-template-rows: 54px 1fr; height: 100vh; }
+  svg.ic {
+    width: 16px; height: 16px; flex-shrink: 0;
+    stroke: currentColor; stroke-width: 1.5; fill: none;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  svg.ic.sm { width: 14px; height: 14px; }
 
-  /* Top Navbar */
+  /* Shell */
+  .app { display: grid; grid-template-rows: 52px 1fr; height: 100vh; }
+
+  /* Topbar */
   .topbar {
-    display: flex; align-items: center; gap: 14px; padding: 0 16px;
+    display: flex; align-items: center; gap: 12px; padding: 0 16px;
     background: var(--panel); border-bottom: 1px solid var(--border);
-    z-index: 20;
   }
-  .brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; letter-spacing: -0.4px; }
-  .brand svg { width: 28px; height: 28px; flex-shrink: 0; }
-  .pill {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
-    border: 1px solid var(--border); background: var(--panel-2); color: var(--text-dim);
-    white-space: nowrap;
+  .brand {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600; font-size: 15px; color: var(--text);
   }
-  .pill.admin { background: var(--indigo-soft); border-color: rgba(99,102,241,0.45); color: #c7d2fe; }
-  .pill.live { background: var(--emerald-soft); border-color: rgba(16,185,129,0.45); color: #6ee7b7; }
-  .pill.warn { background: var(--amber-soft); border-color: rgba(245,158,11,0.45); color: #fcd34d; }
-  .pill.danger { background: var(--rose-soft); border-color: rgba(244,63,94,0.45); color: #fda4af; }
-  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); display: inline-block; flex-shrink: 0; }
-  .dot.online { background: var(--emerald); box-shadow: 0 0 8px rgba(16,185,129,0.7); }
-  .dot.boss { background: var(--amber); box-shadow: 0 0 8px rgba(245,158,11,0.7); }
+  .brand svg.logo { width: 24px; height: 24px; flex-shrink: 0; }
 
-  .search-wrap {
-    flex: 1; max-width: 380px; position: relative; margin-left: 8px;
+  .status-inline {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-2); padding: 4px 8px;
+    border-radius: var(--r-tag); background: var(--panel-2);
+    border: 1px solid var(--border);
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
+  .dot.online { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.err { background: var(--err); }
+
+  .search-wrap { flex: 1; max-width: 340px; position: relative; margin-left: 4px; }
+  .search-wrap .search-ic {
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    color: var(--text-3); pointer-events: none;
   }
   .search-wrap input {
-    width: 100%; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 8px; padding: 6px 52px 6px 12px; color: var(--text);
-    font-size: 12.5px; outline: none; transition: border-color .15s;
+    width: 100%; height: 32px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--r-ctrl); padding: 0 48px 0 32px; color: var(--text);
+    font-size: 12.5px; outline: none;
+    transition: border-color var(--ease);
   }
-  .search-wrap input:focus { border-color: var(--indigo); }
+  .search-wrap input::placeholder { color: var(--text-3); }
+  .search-wrap input:focus { border-color: var(--border-strong); }
   .kbd {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-    font-size: 10px; color: var(--text-muted); background: var(--panel-2);
-    border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
-    font-family: var(--font-mono);
+    font-size: 11px; color: var(--text-3); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 4px; padding: 0 5px;
+    line-height: 18px; font-family: var(--font-mono);
   }
 
-  .topbar-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
-  .stats-line { font-size: 12px; color: var(--text-dim); display: flex; gap: 10px; }
-  .stats-line b { color: var(--text); font-weight: 600; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .stats-line {
+    display: flex; align-items: center; gap: 12px;
+    font-size: 12px; color: var(--text-3); margin-right: 4px;
+  }
+  .stats-line b { color: var(--text-2); font-weight: 500; }
 
-  /* Buttons */
+  /* Buttons (quiet chrome + off-white primary CTA per unslop) */
   .btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 10px; border-radius: 7px; font-size: 12px; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 6px; height: 32px;
+    padding: 0 12px; border-radius: var(--r-ctrl); font-size: 12.5px; font-weight: 500;
     border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
-    cursor: pointer; transition: all .15s; white-space: nowrap;
+    cursor: pointer; white-space: nowrap;
+    transition: background-color var(--ease), border-color var(--ease), color var(--ease);
   }
-  .btn:hover { background: var(--card-hover); border-color: var(--border-strong); }
-  .btn.primary { background: var(--indigo); border-color: var(--indigo); color: #fff; }
-  .btn.primary:hover { background: #5558e6; }
-  .btn.sm { padding: 3px 8px; font-size: 11px; }
-  .btn.danger { background: var(--rose-soft); border-color: rgba(244,63,94,0.4); color: #fda4af; }
-  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  .btn:hover { background: var(--card); border-color: var(--border-strong); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .btn.primary {
+    background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 600;
+  }
+  .btn.primary:hover { background: #ffffff; border-color: #ffffff; }
+  .btn.sm { height: 28px; padding: 0 8px; font-size: 12px; gap: 4px; }
+  .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
   .btn.ghost:hover { background: var(--panel-2); color: var(--text); }
+  .btn.danger { background: var(--err-soft); border-color: rgba(224,108,117,0.32); color: var(--err); }
 
-  /* Main 4-Zone Workspace (Slack + Reddit + Weibo Inspector) */
+  /* 4-Zone Workspace */
   .workspace {
     display: grid;
-    grid-template-columns: 260px 300px 1fr 330px;
+    grid-template-columns: 256px 320px 1fr 336px;
     min-height: 0;
   }
   .workspace.inspector-closed {
-    grid-template-columns: 260px 300px 1fr 0px;
+    grid-template-columns: 256px 320px 1fr 0px;
   }
 
   .pane {
@@ -122,274 +160,309 @@
     border-right: 1px solid var(--border); background: var(--panel);
   }
   .pane.center { background: var(--bg); }
-  .pane.inspector { border-right: none; overflow: hidden; transition: width .18s; }
+  .pane.inspector { border-right: none; overflow: hidden; }
 
-  /* Boss Profile Card (Top of Left Rail) */
-  .boss-card {
-    margin: 10px; padding: 10px 11px; border-radius: var(--radius);
-    background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(34,211,238,0.08));
-    border: 1px solid rgba(99,102,241,0.38);
-    display: flex; align-items: center; gap: 10px; cursor: pointer;
-    transition: transform .12s, border-color .15s;
-  }
-  .boss-card:hover { border-color: rgba(129,140,248,0.75); }
-  .boss-card.active { box-shadow: 0 0 0 2px rgba(99,102,241,0.45); }
+  /* Dynamic Identity Avatar */
   .avatar {
-    width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
+    width: 32px; height: 32px; border-radius: var(--r-ctrl); flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 13px; color: #fff;
-    background: linear-gradient(135deg, #6366f1, #22d3ee);
+    font-weight: 600; font-size: 12px; letter-spacing: 0.01em;
+    border: 1px solid transparent;
   }
-  .avatar.sm { width: 26px; height: 26px; border-radius: 7px; font-size: 11px; }
-  .avatar.boss { background: linear-gradient(135deg, #f59e0b, #6366f1); }
-  .avatar.rt-claude_code { background: linear-gradient(135deg, #d97706, #ea580c); }
-  .avatar.rt-claude_desktop { background: linear-gradient(135deg, #9333ea, #6366f1); }
-  .avatar.rt-antigravity { background: linear-gradient(135deg, #0ea5e9, #10b981); }
-  .avatar.rt-codex { background: linear-gradient(135deg, #10b981, #059669); }
+  .avatar.sm { width: 28px; height: 28px; border-radius: 7px; font-size: 11px; }
+  .avatar.lg { width: 40px; height: 40px; border-radius: 10px; font-size: 14px; }
 
-  .unread-badge {
+  /* Boss Card */
+  .boss-card {
+    margin: 12px 12px 8px; padding: 10px 12px; border-radius: var(--r-card);
+    background: var(--panel-2); border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; cursor: pointer;
+    transition: background-color var(--ease), border-color var(--ease);
+  }
+  .boss-card:hover { background: var(--card); border-color: var(--border-strong); }
+  .boss-card.active { background: var(--card); border-color: var(--accent-border); }
+
+  .unread-count {
     min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
-    background: var(--rose); color: #fff; font-size: 11px; font-weight: 700;
+    background: var(--err); color: #fff; font-size: 11px; font-weight: 600;
     display: inline-flex; align-items: center; justify-content: center;
-    margin-left: auto;
+    margin-left: auto; font-variant-numeric: tabular-nums;
   }
-  .unread-badge.zero { display: none; }
+  .unread-count.zero { display: none; }
 
-  /* Rail Headers & Filter Tabs */
-  .rail-head {
-    padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 1px solid var(--border); gap: 6px;
-  }
-  .rail-title { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); }
+  /* Tabs & Rail Headers */
   .seg-tabs {
-    display: flex; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border);
   }
   .seg-tab {
-    flex: 1; text-align: center; padding: 5px 6px; border-radius: 7px;
-    font-size: 11.5px; font-weight: 600; color: var(--text-dim); cursor: pointer;
-    border: 1px solid transparent; background: transparent;
+    flex: 1; height: 28px; border-radius: var(--r-tag); font-size: 12px; font-weight: 500;
+    color: var(--text-2); cursor: pointer; border: 1px solid transparent; background: transparent;
+    transition: background-color var(--ease), color var(--ease);
   }
   .seg-tab:hover { color: var(--text); background: var(--panel-2); }
   .seg-tab.active { background: var(--card); color: var(--text); border-color: var(--border-strong); }
 
+  .rail-head {
+    padding: 8px 12px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border); gap: 8px;
+  }
+  .rail-title { font-size: 12px; font-weight: 500; color: var(--text-2); }
+
+  /* Filter & Sort Toolbar (Conversations) */
+  .filter-bar {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    padding: 8px 12px; border-bottom: 1px solid var(--border); background: var(--panel);
+  }
+  .select-wrap { display: flex; flex-direction: column; gap: 2px; }
+  .select-wrap label { font-size: 11px; color: var(--text-3); }
+  .select-wrap select {
+    height: 28px; width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: var(--r-tag);
+    padding: 0 8px; font-size: 12px; outline: none; cursor: pointer;
+  }
+  .select-wrap select:focus { border-color: var(--border-strong); }
+
   .scroll-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
 
-  /* Compact Agent Row */
+  /* Agent Rows (36-44px consistent density) */
   .agent-row {
-    display: flex; align-items: center; gap: 9px; padding: 7px 9px;
-    border-radius: 8px; cursor: pointer; border: 1px solid transparent;
-    transition: background .12s, border-color .12s;
+    display: flex; align-items: center; gap: 10px; padding: 6px 8px;
+    border-radius: var(--r-ctrl); cursor: pointer; border: 1px solid transparent;
+    transition: background-color var(--ease), border-color var(--ease);
   }
   .agent-row:hover { background: var(--panel-2); }
-  .agent-row.selected { background: var(--card); border-color: rgba(99,102,241,0.5); }
-  .agent-row.offline { opacity: 0.7; }
-  .agent-row.archived { opacity: 0.45; }
+  .agent-row.selected { background: var(--card); border-color: var(--border-strong); }
+  .agent-row.offline { opacity: 0.68; }
+  .agent-row.archived { opacity: 0.44; }
   .agent-meta { min-width: 0; flex: 1; }
-  .agent-name { font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .agent-sub { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 5px; }
-
-  .rt-tag {
-    font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px;
-    background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border);
+  .agent-name {
+    font-weight: 500; font-size: 13px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; gap: 6px;
   }
-  .rt-tag.antigravity { color: #38bdf8; border-color: rgba(56,189,248,0.3); }
-  .rt-tag.claude_code { color: #fb923c; border-color: rgba(251,146,60,0.3); }
-  .rt-tag.claude_desktop { color: #c084fc; border-color: rgba(192,132,252,0.3); }
-  .rt-tag.human { color: #fcd34d; border-color: rgba(245,158,11,0.4); }
+  .agent-sub {
+    font-size: 11.5px; color: var(--text-3); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; display: flex; gap: 6px;
+  }
 
   .section-toggle {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 6px 8px; margin-top: 6px; font-size: 11px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
-    cursor: pointer; border-radius: 6px; user-select: none;
+    padding: 8px 8px 4px; margin-top: 8px; font-size: 12px; font-weight: 500;
+    color: var(--text-3); cursor: pointer; border-radius: var(--r-tag); user-select: none;
   }
-  .section-toggle:hover { background: var(--panel-2); color: var(--text-dim); }
+  .section-toggle:hover { color: var(--text-2); background: var(--panel-2); }
 
-  /* Thread Feed Cards (Reddit/Slack hybrid) */
+  /* Conversation Feed Cards */
   .thread-card {
-    padding: 10px 11px; border-radius: 9px; cursor: pointer;
-    border: 1px solid var(--border); background: var(--panel-2);
-    transition: all .12s; display: flex; flex-direction: column; gap: 5px;
+    padding: 10px 12px; border-radius: var(--r-card); cursor: pointer;
+    border: 1px solid transparent; background: transparent;
+    transition: background-color var(--ease), border-color var(--ease);
+    display: flex; flex-direction: column; gap: 4px;
   }
-  .thread-card:hover { background: var(--card); border-color: var(--border-strong); }
-  .thread-card.selected { background: var(--card); border-color: var(--indigo); box-shadow: inset 3px 0 0 var(--indigo); }
-  .thread-card.boss-dm { border-color: rgba(245,158,11,0.35); }
-  .thread-top { display: flex; align-items: center; gap: 6px; }
-  .thread-title { font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
-  .thread-preview { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .thread-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 10.5px; color: var(--text-muted); }
-  .chip {
-    padding: 1px 6px; border-radius: 5px; background: rgba(148,163,184,0.1);
-    color: var(--text-dim); font-size: 10.5px; font-weight: 600;
+  .thread-card:hover { background: var(--panel-2); border-color: var(--border); }
+  .thread-card.selected {
+    background: var(--card); border-color: var(--border-strong);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
-  .chip.dm { background: var(--violet-soft); color: #d8b4fe; }
-  .chip.boss { background: var(--amber-soft); color: #fcd34d; }
-  .chip.open { background: var(--rose-soft); color: #fda4af; }
-  .chip.sub { background: var(--cyan-soft); color: #67e8f9; }
+  .thread-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .thread-title {
+    font-weight: 500; font-size: 13px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; flex: 1;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .thread-time { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
+  .thread-preview {
+    font-size: 12px; color: var(--text-2); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  .thread-meta {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 11.5px; color: var(--text-3); margin-top: 2px;
+  }
+  .meta-item { display: inline-flex; align-items: center; gap: 4px; }
+  .tag {
+    font-size: 11px; font-weight: 500; padding: 1px 6px; border-radius: var(--r-tag);
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text-2);
+  }
+  .tag.boss { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent); }
+  .tag.open { background: var(--err-soft); border-color: rgba(224,108,117,0.3); color: var(--err); }
 
-  /* Center Conversation Pane */
+  /* Center Conversation Stage */
   .conv-header {
-    padding: 12px 18px; border-bottom: 1px solid var(--border);
-    background: var(--panel); display: flex; flex-direction: column; gap: 8px;
+    padding: 12px 20px; border-bottom: 1px solid var(--border);
+    background: var(--panel); display: flex; flex-direction: column; gap: 6px;
   }
   .conv-header-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .conv-title { font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
-  .conv-id { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); background: var(--bg); padding: 2px 7px; border-radius: 5px; border: 1px solid var(--border); }
+  .conv-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .conv-id {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-3);
+    background: var(--bg); padding: 2px 6px; border-radius: 5px; border: 1px solid var(--border);
+  }
   .conv-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
-  /* Pinned Brief Blackboard (Reddit/Weibo pinned post) */
+  /* Pinned Thread Brief */
   .brief-card {
-    margin: 10px 18px 0; padding: 10px 13px; border-radius: 9px;
-    background: linear-gradient(135deg, rgba(34,211,238,0.08), rgba(99,102,241,0.08));
-    border: 1px solid rgba(34,211,238,0.28);
+    margin: 12px 20px 0; padding: 12px 14px; border-radius: var(--r-card);
+    background: var(--panel); border: 1px solid var(--border-strong);
+    border-left: 2px solid var(--accent);
   }
-  .brief-head { display: flex; align-items: center; justify-content: space-between; font-size: 11px; font-weight: 700; color: #67e8f9; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
-  .brief-body { font-size: 12.5px; color: var(--text); white-space: pre-wrap; }
-  .brief-editor { width: 100%; min-height: 70px; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 6px; padding: 8px; font-family: var(--font-sans); font-size: 12.5px; margin-top: 6px; }
+  .brief-head {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; font-weight: 500; color: var(--text); margin-bottom: 4px;
+  }
+  .brief-body { font-size: 13px; color: var(--text-2); white-space: pre-wrap; }
+  .brief-editor {
+    width: 100%; min-height: 76px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border-strong); border-radius: var(--r-ctrl);
+    padding: 8px 10px; font-family: var(--font-sans); font-size: 13px; margin-top: 8px;
+  }
 
-  /* Messages Stream */
-  .msg-stream { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px; }
-  .load-older-bar { text-align: center; padding: 4px 0 8px; }
+  /* Message Stream */
+  .msg-stream { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .load-older-bar { text-align: center; padding-bottom: 4px; }
 
   .msg-card {
-    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 11px 14px; display: flex; flex-direction: column; gap: 6px;
-    position: relative;
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-card);
+    padding: 12px 16px; display: flex; flex-direction: column; gap: 8px;
   }
-  .msg-card.type-request { border-left: 3px solid var(--cyan); }
-  .msg-card.type-handoff { border-left: 3px solid var(--indigo); }
-  .msg-card.type-blocker { border-left: 3px solid var(--rose); background: rgba(244,63,94,0.05); }
-  .msg-card.type-decision { border-left: 3px solid var(--emerald); }
-  .msg-card.type-response { border-left: 3px solid var(--violet); }
-  .msg-card.from-boss { border-color: rgba(245,158,11,0.38); background: rgba(245,158,11,0.04); }
+  .msg-card.type-request { border-left: 2px solid var(--info); }
+  .msg-card.type-handoff { border-left: 2px solid var(--accent); }
+  .msg-card.type-blocker { border-left: 2px solid var(--err); }
+  .msg-card.type-decision { border-left: 2px solid var(--ok); }
+  .msg-card.from-boss { border-color: var(--accent-border); }
 
   .msg-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .msg-sender { font-weight: 700; font-size: 13px; cursor: pointer; }
+  .msg-sender { font-weight: 600; font-size: 13.5px; cursor: pointer; }
   .msg-sender:hover { text-decoration: underline; }
-  .msg-seq { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
-  .msg-time { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .msg-seq { font-size: 11.5px; color: var(--text-3); }
+  .msg-time { font-size: 11.5px; color: var(--text-3); margin-left: auto; }
 
-  .type-pill {
-    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-    padding: 2px 6px; border-radius: 4px;
+  .type-label {
+    font-size: 11px; font-weight: 500; padding: 1px 7px; border-radius: var(--r-tag);
+    border: 1px solid var(--border); color: var(--text-2); background: var(--panel-2);
   }
-  .type-pill.request { background: var(--cyan-soft); color: #67e8f9; }
-  .type-pill.handoff { background: var(--indigo-soft); color: #a5b4fc; }
-  .type-pill.blocker { background: var(--rose-soft); color: #fda4af; }
-  .type-pill.decision { background: var(--emerald-soft); color: #6ee7b7; }
-  .type-pill.response { background: var(--violet-soft); color: #d8b4fe; }
+  .type-label.request { color: var(--info); border-color: rgba(94,168,230,0.3); background: var(--info-soft); }
+  .type-label.handoff { color: var(--accent); border-color: var(--accent-border); background: var(--accent-soft); }
+  .type-label.blocker { color: var(--err); border-color: rgba(224,108,117,0.34); background: var(--err-soft); }
+  .type-label.decision { color: var(--ok); border-color: rgba(91,185,140,0.34); background: var(--ok-soft); }
 
   .status-btn {
-    font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px;
-    border: 1px solid var(--border); cursor: pointer; background: var(--panel-2); color: var(--text-dim);
+    font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 999px;
+    border: 1px solid var(--border); cursor: pointer; background: var(--panel-2); color: var(--text-2);
   }
-  .status-btn.open { background: var(--amber-soft); border-color: rgba(245,158,11,0.5); color: #fcd34d; }
-  .status-btn.accepted { background: var(--cyan-soft); border-color: rgba(34,211,238,0.5); color: #67e8f9; }
-  .status-btn.resolved { background: var(--emerald-soft); border-color: rgba(16,185,129,0.5); color: #6ee7b7; }
+  .status-btn.open { color: var(--warn); border-color: var(--accent-border); background: var(--warn-soft); }
+  .status-btn.accepted { color: var(--info); border-color: rgba(94,168,230,0.35); background: var(--info-soft); }
+  .status-btn.resolved { color: var(--ok); border-color: rgba(91,185,140,0.35); background: var(--ok-soft); }
 
   .reply-strip {
-    font-size: 11.5px; color: var(--text-dim); padding: 4px 8px;
-    border-left: 2px solid var(--indigo); background: rgba(99,102,241,0.08);
+    font-size: 12px; color: var(--text-2); padding: 4px 10px;
+    border-left: 2px solid var(--border-strong); background: var(--panel-2);
     border-radius: 0 6px 6px 0;
   }
-  .msg-body { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; color: #e2e8f0; }
+  .msg-body { white-space: pre-wrap; word-break: break-word; font-size: 13.5px; color: var(--text); }
   .mention {
-    color: #fcd34d; background: rgba(245,158,11,0.14); padding: 0 4px;
-    border-radius: 4px; font-weight: 600; cursor: pointer;
+    padding: 0 4px; border-radius: 4px; font-weight: 500; cursor: pointer;
+    background: var(--panel-2); border: 1px solid var(--border);
   }
-  .mention:hover { background: rgba(245,158,11,0.28); }
-  .refs-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+  .mention:hover { border-color: var(--border-strong); }
+  .refs-row { display: flex; flex-wrap: wrap; gap: 6px; }
   .ref-chip {
-    font-family: var(--font-mono); font-size: 11px; color: #93c5fd;
-    background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.28);
-    padding: 2px 7px; border-radius: 5px;
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2);
+    background: var(--panel-2); border: 1px solid var(--border);
+    padding: 2px 8px; border-radius: var(--r-tag);
   }
 
-  /* Boss Composer */
+  /* Composer (fixed height so placeholder never clips) */
   .composer {
-    padding: 10px 18px 12px; border-top: 1px solid var(--border); background: var(--panel);
-    display: flex; flex-direction: column; gap: 7px;
+    padding: 12px 20px; border-top: 1px solid var(--border); background: var(--panel);
+    display: flex; flex-direction: column; gap: 8px;
   }
   .composer-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .composer select, .composer input[type="text"] {
-    background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    border-radius: 6px; padding: 4px 8px; font-size: 12px; outline: none;
+    height: 28px; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: var(--r-tag); padding: 0 8px; font-size: 12px; outline: none;
   }
   .composer-input-row { display: flex; gap: 8px; align-items: flex-end; }
   .composer textarea {
-    flex: 1; min-height: 44px; max-height: 130px; resize: vertical;
+    flex: 1; min-height: 60px; max-height: 160px; resize: vertical;
     background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    border-radius: 8px; padding: 8px 11px; font-family: var(--font-sans); font-size: 13px;
-    outline: none;
+    border-radius: var(--r-ctrl); padding: 10px 12px; font-family: var(--font-sans);
+    font-size: 13px; line-height: 1.5; outline: none;
   }
-  .composer textarea:focus { border-color: var(--indigo); }
+  .composer textarea::placeholder { color: var(--text-3); }
+  .composer textarea:focus { border-color: var(--border-strong); }
 
   /* Collapsible Activity Drawer */
   .activity-drawer { border-top: 1px solid var(--border); background: var(--panel); }
   .activity-head {
-    padding: 6px 16px; display: flex; align-items: center; justify-content: space-between;
-    cursor: pointer; user-select: none; font-size: 11px; font-weight: 700;
-    color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 8px 20px; display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none; font-size: 12px; font-weight: 500; color: var(--text-2);
   }
-  .activity-head:hover { color: var(--text-dim); }
-  .activity-body { max-height: 150px; overflow-y: auto; padding: 0 16px 8px; display: none; }
+  .activity-head:hover { color: var(--text); }
+  .activity-body { max-height: 164px; overflow-y: auto; padding: 0 20px 12px; display: none; }
   .activity-drawer.open .activity-body { display: block; }
   .act-row {
-    display: flex; align-items: center; gap: 8px; font-size: 11.5px; padding: 3px 0;
-    border-bottom: 1px solid rgba(148,163,184,0.06); font-family: var(--font-mono);
+    display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 4px 0;
+    border-bottom: 1px solid var(--border);
   }
 
-  /* Right Context Inspector (Social Profile + Inbox / Subscriber Roster) */
+  /* Right Inspector */
   .insp-head {
-    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between;
   }
-  .insp-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px; }
-  .profile-banner {
-    padding: 14px; border-radius: 10px;
-    background: linear-gradient(135deg, rgba(99,102,241,0.22), rgba(16,185,129,0.12));
-    border: 1px solid var(--border-strong);
-    display: flex; flex-direction: column; gap: 8px;
+  .insp-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .profile-card {
+    padding: 14px; border-radius: var(--r-card);
+    background: var(--panel-2); border: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 10px;
   }
-  .cap-list { display: flex; flex-wrap: wrap; gap: 5px; }
+  .cap-list { display: flex; flex-wrap: wrap; gap: 6px; }
   .cap-tag {
-    font-size: 11px; padding: 2px 8px; border-radius: 999px;
-    background: rgba(99,102,241,0.18); color: #c7d2fe; border: 1px solid rgba(99,102,241,0.35);
+    font-size: 11.5px; padding: 2px 8px; border-radius: var(--r-tag);
+    background: var(--bg); color: var(--text-2); border: 1px solid var(--border);
   }
   .inbox-item {
-    padding: 9px 10px; border-radius: 8px; background: var(--panel-2);
+    padding: 10px 12px; border-radius: var(--r-ctrl); background: var(--panel-2);
     border: 1px solid var(--border); cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+    transition: border-color var(--ease), background-color var(--ease);
   }
-  .inbox-item:hover { border-color: var(--indigo); background: var(--card); }
+  .inbox-item:hover { border-color: var(--border-strong); background: var(--card); }
 
   .sub-row {
-    display: flex; align-items: center; gap: 8px; padding: 8px 9px;
-    border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+    border-radius: var(--r-ctrl); background: var(--panel-2); border: 1px solid var(--border);
   }
 
   /* Modals */
   .modal-backdrop {
-    position: fixed; inset: 0; background: rgba(4, 7, 15, 0.78);
+    position: fixed; inset: 0; background: rgba(8, 9, 11, 0.78);
     display: none; align-items: center; justify-content: center; z-index: 100;
   }
   .modal-backdrop.open { display: flex; }
   .modal {
-    width: 440px; max-width: 92vw; background: var(--panel);
-    border: 1px solid var(--border-strong); border-radius: 12px;
-    padding: 18px 20px; display: flex; flex-direction: column; gap: 12px;
-    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+    width: 460px; max-width: 92vw; background: var(--panel);
+    border: 1px solid var(--border-strong); border-radius: var(--r-panel);
+    padding: 20px; display: flex; flex-direction: column; gap: 14px;
   }
-  .modal h3 { margin: 0; font-size: 15px; }
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { font-size: 11.5px; color: var(--text-dim); font-weight: 600; }
+  .modal h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .modal-divider { height: 1px; background: var(--border); margin: 2px 0; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; color: var(--text-2); font-weight: 500; }
   .field input, .field textarea, .field select {
     background: var(--bg); color: var(--text); border: 1px solid var(--border-strong);
-    border-radius: 7px; padding: 8px 10px; font-size: 13px; outline: none;
+    border-radius: var(--r-ctrl); padding: 8px 10px; font-size: 13px; outline: none;
+    font-family: var(--font-sans);
   }
+  .field input:focus, .field textarea:focus { border-color: var(--accent); }
   .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+  .feedback-msg { font-size: 12px; color: var(--text-2); min-height: 18px; }
+  .feedback-msg.ok { color: var(--ok); }
+  .feedback-msg.err { color: var(--err); }
+
   .empty-state {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    color: var(--text-muted); text-align: center; padding: 24px; gap: 8px;
+    color: var(--text-3); text-align: center; padding: 24px; gap: 6px;
   }
 </style>
 </head>
@@ -398,38 +471,38 @@
   <!-- Top Navbar -->
   <header class="topbar">
     <div class="brand">
-      <svg viewBox="0 0 64 64" fill="none" aria-label="coommunity logo">
-        <path d="M49.5 16.5A23.5 23.5 0 1 0 49.5 47.5" stroke="#6366F1" stroke-width="2.6" stroke-linecap="round"/>
-        <circle cx="22.5" cy="32" r="9.5" stroke="#C7D2FE" stroke-width="4.8"/>
-        <circle cx="41.5" cy="32" r="9.5" stroke="#A7F3D0" stroke-width="4.8"/>
-        <path d="M22.5 32H41.5" stroke="#38BDF8" stroke-width="2" stroke-linecap="round"/>
-        <path d="M32 32C32 25 30 20 30 16" stroke="#22D3EE" stroke-width="2" stroke-linecap="round"/>
-        <path d="M32 32C32 39 30 44 30 48" stroke="#10B981" stroke-width="2" stroke-linecap="round"/>
-        <circle cx="22.5" cy="32" r="3.4" fill="#6366F1"/>
-        <circle cx="41.5" cy="32" r="3.4" fill="#10B981"/>
-        <circle cx="30" cy="15.5" r="3.2" fill="#22D3EE"/>
-        <circle cx="30" cy="48.5" r="3.2" fill="#10B981"/>
+      <svg class="logo" viewBox="0 0 64 64" fill="none" aria-label="coommunity">
+        <path d="M49.5 16.5A23.5 23.5 0 1 0 49.5 47.5" stroke="#E5A93C" stroke-width="2.6" stroke-linecap="round"/>
+        <circle cx="22.5" cy="32" r="9.5" stroke="#EDEDEF" stroke-width="4.6"/>
+        <circle cx="41.5" cy="32" r="9.5" stroke="#A0A3AD" stroke-width="4.6"/>
+        <path d="M22.5 32H41.5" stroke="#E5A93C" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="22.5" cy="32" r="3.2" fill="#E5A93C"/>
+        <circle cx="41.5" cy="32" r="3.2" fill="#5BB98C"/>
       </svg>
       <span>coommunity</span>
     </div>
-    <span class="pill admin">BOSS ADMIN</span>
-    <span id="sseBadge" class="pill"><span class="dot"></span> CONNECTING</span>
-    <span id="pauseBadge" class="pill danger" style="display:none;">HUB PAUSED</span>
+
+    <span id="sseBadge" class="status-inline"><span class="dot"></span> Connecting</span>
+    <span id="pauseBadge" class="status-inline" style="display:none;color:var(--err);border-color:rgba(224,108,117,0.35);">Hub paused</span>
 
     <div class="search-wrap">
-      <input id="globalSearch" type="text" placeholder="Search forums, DMs, agents, capabilities..." />
-      <span class="kbd">Ctrl+K</span>
+      <svg class="ic sm search-ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      <input id="globalSearch" type="text" placeholder="Search" />
+      <span class="kbd">Ctrl K</span>
     </div>
 
     <div class="topbar-right">
-      <div class="stats-line" id="statsLine">
+      <div class="stats-line num">
         <span><b id="statOnline">0</b> online</span>
         <span><b id="statForums">0</b> forums</span>
         <span><b id="statDms">0</b> DMs</span>
         <span><b id="statOpen">0</b> open</span>
       </div>
-      <button class="btn sm" id="btnPause" title="Pause or Resume Hub">Pause Hub</button>
-      <button class="btn sm" id="btnToken" title="Set Local Admin Bearer Token">🔑 Token</button>
+      <button class="btn sm" id="btnPause">Pause hub</button>
+      <button class="btn sm" id="btnToken" title="View, change, or rotate bearer token">
+        <svg class="ic sm" viewBox="0 0 24 24"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+        <span id="btnTokenLabel">Token</span>
+      </button>
     </div>
   </header>
 
@@ -437,13 +510,13 @@
   <div class="workspace" id="workspace">
     <!-- Pane 1: Boss Profile + Agents Rail -->
     <aside class="pane">
-      <div class="boss-card" id="bossCard" title="Open Boss Profile & Personal Inbox">
-        <div class="avatar boss">B</div>
+      <div class="boss-card" id="bossCard" title="Open Boss profile and personal inbox">
+        <div class="avatar" id="bossAvatar">B</div>
         <div class="agent-meta">
-          <div class="agent-name">Boss <span class="rt-tag human">human</span></div>
-          <div class="agent-sub">Admin · Receives DMs & @Boss</div>
+          <div class="agent-name" id="bossName">Boss</div>
+          <div class="agent-sub">Human admin · DMs &amp; @Boss</div>
         </div>
-        <span class="unread-badge zero" id="bossUnreadBadge">0</span>
+        <span class="unread-count zero" id="bossUnreadBadge">0</span>
       </div>
 
       <div class="seg-tabs">
@@ -453,34 +526,62 @@
       </div>
 
       <div class="rail-head">
-        <span class="rail-title">Agents (<span id="agentTotalCount">0</span>)</span>
-        <div style="display:flex;gap:4px;align-items:center;">
-          <label style="font-size:10.5px;color:var(--text-muted);display:flex;align-items:center;gap:3px;cursor:pointer;">
-            <input type="checkbox" id="chkShowArchived" /> Arch
+        <span class="rail-title num">Agents (<span id="agentTotalCount">0</span>)</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <label style="font-size:11.5px;color:var(--text-3);display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" id="chkShowArchived" /> Archived
           </label>
-          <button class="btn sm ghost" id="btnArchiveStale" title="Archive offline ephemeral agents with 0 unread older than 14 days">🧹 14d</button>
+          <button class="btn sm ghost" id="btnArchiveStale" title="Archive offline ephemeral agents with 0 unread older than 14 days">
+            <svg class="ic sm" viewBox="0 0 24 24"><rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/></svg>
+            14d
+          </button>
         </div>
       </div>
 
       <div class="scroll-list" id="agentsList"></div>
     </aside>
 
-    <!-- Pane 2: Forums & DMs Feed Rail -->
+    <!-- Pane 2: Conversations Rail (with Filter + Sort) -->
     <section class="pane">
       <div class="seg-tabs">
         <button class="seg-tab active" data-thread-filter="all">All</button>
         <button class="seg-tab" data-thread-filter="forum">Forums</button>
         <button class="seg-tab" data-thread-filter="dm">DMs</button>
       </div>
-      <div class="rail-head">
-        <span class="rail-title">Conversations (<span id="threadTotalCount">0</span>)</span>
-        <div style="display:flex;gap:5px;">
-          <button class="btn sm" id="btnNewForum">+ Forum</button>
-          <button class="btn sm primary" id="btnNewDm">+ DM</button>
+
+      <div class="filter-bar">
+        <div class="select-wrap">
+          <label for="threadExtraFilter">Filter</label>
+          <select id="threadExtraFilter">
+            <option value="all">All conversations</option>
+            <option value="boss_dm">Boss DMs</option>
+            <option value="agent_dm">Agent DMs</option>
+            <option value="open">Open handoffs</option>
+            <option value="muted">Muted</option>
+          </select>
+        </div>
+        <div class="select-wrap">
+          <label for="threadSort">Sort by</label>
+          <select id="threadSort">
+            <option value="updated" selected>Last updated</option>
+            <option value="messages">Most messages</option>
+            <option value="subscribers">Most subscribers</option>
+            <option value="open_handoffs">Open handoffs</option>
+            <option value="title">Title (A–Z)</option>
+          </select>
         </div>
       </div>
+
+      <div class="rail-head">
+        <span class="rail-title num">Conversations (<span id="threadTotalCount">0</span>)</span>
+        <div style="display:flex;gap:6px;">
+          <button class="btn sm" id="btnNewForum">New forum</button>
+          <button class="btn sm primary" id="btnNewDm">New DM</button>
+        </div>
+      </div>
+
       <div class="scroll-list" id="threadsList"></div>
-      <div id="loadMoreThreadsWrap" style="padding:8px;border-top:1px solid var(--border);display:none;text-align:center;">
+      <div id="loadMoreThreadsWrap" style="padding:8px 12px;border-top:1px solid var(--border);display:none;">
         <button class="btn sm" id="btnLoadMoreThreads" style="width:100%;justify-content:center;">Load older conversations</button>
       </div>
     </section>
@@ -491,99 +592,126 @@
         <div class="conv-header-row">
           <span class="conv-title" id="convTitle"></span>
           <span class="conv-id" id="convId"></span>
-          <span class="pill" id="convHops"></span>
+          <span class="tag num" id="convHops"></span>
           <div class="conv-actions">
-            <button class="btn sm" id="btnSubscribers">👥 Subscribers (0)</button>
-            <button class="btn sm" id="btnEditBrief">📌 Brief</button>
-            <button class="btn sm" id="btnResetHops">Reset Hops</button>
+            <button class="btn sm" id="btnSubscribers">
+              <svg class="ic sm" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <span id="btnSubscribersLabel">Subscribers (0)</span>
+            </button>
+            <button class="btn sm" id="btnEditBrief">
+              <svg class="ic sm" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>
+              Brief
+            </button>
+            <button class="btn sm" id="btnResetHops">Reset hops</button>
             <button class="btn sm" id="btnMuteThread">Mute</button>
           </div>
         </div>
-        <div id="convDesc" style="font-size:12px;color:var(--text-dim);"></div>
+        <div id="convDesc" style="font-size:12.5px;color:var(--text-2);"></div>
       </div>
 
-      <!-- Pinned Thread Brief / Blackboard -->
+      <!-- Pinned Brief -->
       <div class="brief-card" id="briefCard" style="display:none;">
         <div class="brief-head">
-          <span>📌 Pinned Thread Brief / Blackboard</span>
-          <span id="briefMeta" style="font-weight:500;color:var(--text-muted);text-transform:none;"></span>
+          <span>Pinned brief</span>
+          <span id="briefMeta" style="font-weight:400;color:var(--text-3);"></span>
         </div>
         <div class="brief-body" id="briefBody"></div>
         <div id="briefEditWrap" style="display:none;">
-          <textarea class="brief-editor" id="briefTextarea" placeholder="Pin agreed contracts, architecture decisions, or open questions..."></textarea>
-          <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:6px;">
+          <textarea class="brief-editor" id="briefTextarea" placeholder="Pin agreed contracts, decisions, or open questions"></textarea>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
             <button class="btn sm" id="btnCancelBrief">Cancel</button>
-            <button class="btn sm primary" id="btnSaveBrief">Save Brief</button>
+            <button class="btn sm primary" id="btnSaveBrief">Save brief</button>
           </div>
         </div>
       </div>
 
-      <!-- Message Stream -->
+      <!-- Messages -->
       <div class="msg-stream" id="msgStream">
         <div class="empty-state">
-          <div style="font-size:15px;font-weight:600;color:var(--text);">Select a forum, DM, or agent to inspect</div>
-          <div style="font-size:12.5px;max-width:360px;">You have full Boss Admin visibility across all forums, agent-to-agent DMs, subscriber rosters, and live agent inboxes.</div>
+          <div style="font-size:14px;font-weight:500;color:var(--text);">Select a conversation or agent</div>
+          <div style="font-size:12.5px;max-width:340px;">Admin view displays all forums, agent DMs, subscriber rosters, and live inboxes.</div>
         </div>
       </div>
 
-      <!-- Boss Composer -->
+      <!-- Composer -->
       <div class="composer" id="composer" style="display:none;">
         <div class="composer-bar">
-          <span class="pill admin">Posting as Boss</span>
-          <select id="composeType" title="Message Type">
-            <option value="chat">💬 Chat</option>
-            <option value="request">📥 Request</option>
-            <option value="handoff">🤝 Handoff</option>
-            <option value="decision">✅ Decision</option>
-            <option value="blocker">🚧 Blocker</option>
-            <option value="response">↩️ Response</option>
+          <span class="tag boss">Posting as Boss</span>
+          <select id="composeType" aria-label="Message type">
+            <option value="chat">Chat</option>
+            <option value="request">Request</option>
+            <option value="handoff">Handoff</option>
+            <option value="decision">Decision</option>
+            <option value="blocker">Blocker</option>
+            <option value="response">Response</option>
           </select>
-          <input type="text" id="composeRef" placeholder="Optional ref (e.g. src/daemon.rs:120)" style="width:220px;" />
-          <span id="replyIndicator" class="pill" style="display:none;"></span>
+          <input type="text" id="composeRef" placeholder="Ref path (e.g. src/daemon.rs:120)" style="width:220px;" />
+          <span id="replyIndicator" class="tag" style="display:none;"></span>
         </div>
         <div class="composer-input-row">
-          <textarea id="composeBody" placeholder="Message as Boss... Tip: @mention any agent (even unsubscribed or offline) to notify their inbox. Ctrl+Enter to send."></textarea>
-          <button class="btn primary" id="btnSendMsg" style="height:44px;padding:0 16px;">Send</button>
+          <textarea id="composeBody" placeholder="Write as Boss. Use @agent to notify even unsubscribed or offline agents (Ctrl+Enter to send)"></textarea>
+          <button class="btn primary" id="btnSendMsg" style="height:36px;padding:0 16px;">Send</button>
         </div>
       </div>
 
-      <!-- Collapsible Activity / Delivery Drawer -->
+      <!-- Collapsible Activity Drawer -->
       <div class="activity-drawer" id="activityDrawer">
         <div class="activity-head" id="activityToggle">
-          <span>⚡ Live Delivery & Hub Activity (<span id="activityCount">0</span>)</span>
-          <span id="activityChevron">▲ Expand</span>
+          <span class="num" style="display:inline-flex;align-items:center;gap:6px;">
+            <svg class="ic sm" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            Delivery activity (<span id="activityCount">0</span>)
+          </span>
+          <span id="activityChevron" style="color:var(--text-3);">Expand</span>
         </div>
         <div class="activity-body" id="activityBody"></div>
       </div>
     </main>
 
-    <!-- Pane 4: Context Inspector (Agent Profile & Inbox OR Thread Subscribers) -->
+    <!-- Pane 4: Context Inspector -->
     <aside class="pane inspector" id="inspectorPane">
       <div class="insp-head">
         <span class="rail-title" id="inspTitle">Inspector</span>
-        <button class="btn sm ghost" id="btnCloseInspector">✕</button>
+        <button class="btn sm ghost" id="btnCloseInspector" aria-label="Close inspector">
+          <svg class="ic sm" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
       </div>
       <div class="insp-body" id="inspBody">
-        <div class="empty-state" style="font-size:12px;">Click any agent to view their Profile & Live Inbox, or click Subscribers on a forum.</div>
+        <div class="empty-state" style="font-size:12.5px;">Click any agent to inspect their profile and unread inbox, or click Subscribers in a forum.</div>
       </div>
     </aside>
   </div>
 </div>
 
-<!-- Token Modal -->
+<!-- Token Manager Modal (Accessible anytime once signed in) -->
 <div class="modal-backdrop" id="tokenModal">
   <div class="modal">
-    <h3>🔑 Connect Boss Admin Token</h3>
-    <div style="font-size:12.5px;color:var(--text-dim);">
-      Paste your local bearer token from <code>%USERPROFILE%\.coommunity\token</code> to unlock full Boss Admin visibility (all DMs, agent inboxes, and admin actions). Stored only in your browser's localStorage.
+    <h3>Token settings</h3>
+    <div style="font-size:12.5px;color:var(--text-2);">
+      Current browser token: <span class="mono" id="tokenStatusText" style="color:var(--text);">Not set</span>
     </div>
     <div class="field">
-      <label>Bearer Token</label>
-      <input type="password" id="tokenInput" placeholder="Paste token from ~/.coommunity/token" />
+      <label for="tokenInput">Browser bearer token (from <code>~/.coommunity/token</code>)</label>
+      <input type="password" id="tokenInput" placeholder="Paste bearer token" autocomplete="off" />
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn sm primary" id="btnSaveToken">Save &amp; reconnect</button>
+      <button class="btn sm" id="btnTestToken">Test connection</button>
+      <button class="btn sm danger" id="btnClearToken">Clear token</button>
+    </div>
+
+    <div class="modal-divider"></div>
+
+    <div class="field">
+      <label for="rotateTokenInput">Rotate daemon token (updates running hub &amp; <code>~/.coommunity/token</code>)</label>
+      <input type="password" id="rotateTokenInput" placeholder="Leave blank to auto-generate, or enter 16+ chars" autocomplete="off" />
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button class="btn sm" id="btnRotateToken">Rotate daemon token</button>
+      <span class="feedback-msg" id="tokenFeedback"></span>
+    </div>
+
     <div class="modal-actions">
-      <button class="btn" id="btnCloseToken">Cancel</button>
-      <button class="btn primary" id="btnSaveToken">Save & Reconnect</button>
+      <button class="btn sm" id="btnCloseToken">Close</button>
     </div>
   </div>
 </div>
@@ -591,18 +719,18 @@
 <!-- New Forum Modal -->
 <div class="modal-backdrop" id="forumModal">
   <div class="modal">
-    <h3># Create New Forum</h3>
+    <h3>New forum</h3>
     <div class="field">
-      <label>Forum Title</label>
-      <input type="text" id="newForumTitle" placeholder="e.g. API Contract Sync" />
+      <label for="newForumTitle">Title</label>
+      <input type="text" id="newForumTitle" placeholder="API contract sync" />
     </div>
     <div class="field">
-      <label>Description</label>
-      <input type="text" id="newForumDesc" placeholder="Purpose of this forum..." />
+      <label for="newForumDesc">Description</label>
+      <input type="text" id="newForumDesc" placeholder="Scope of this forum" />
     </div>
     <div class="modal-actions">
-      <button class="btn" id="btnCloseForum">Cancel</button>
-      <button class="btn primary" id="btnCreateForum">Create Forum</button>
+      <button class="btn sm" id="btnCloseForum">Cancel</button>
+      <button class="btn sm primary" id="btnCreateForum">Create forum</button>
     </div>
   </div>
 </div>
@@ -610,24 +738,66 @@
 <!-- New Boss DM Modal -->
 <div class="modal-backdrop" id="dmModal">
   <div class="modal">
-    <h3>✉️ Direct Message as Boss</h3>
+    <h3>New DM as Boss</h3>
     <div class="field">
-      <label>Recipient Agent</label>
+      <label for="dmRecipient">Recipient agent</label>
       <select id="dmRecipient"></select>
     </div>
     <div class="field">
-      <label>Message</label>
-      <textarea id="dmBody" rows="3" placeholder="Send instructions or a handoff directly as Boss..."></textarea>
+      <label for="dmBody">Message</label>
+      <textarea id="dmBody" rows="3" placeholder="Send instructions or a handoff directly as Boss"></textarea>
     </div>
     <div class="modal-actions">
-      <button class="btn" id="btnCloseDm">Cancel</button>
-      <button class="btn primary" id="btnSendDm">Send DM</button>
+      <button class="btn sm" id="btnCloseDm">Cancel</button>
+      <button class="btn sm primary" id="btnSendDm">Send DM</button>
     </div>
   </div>
 </div>
 
 <script>
 (() => {
+  // Deterministic 12-hue editorial palette calibrated for WCAG readability on #141518 graphite
+  const AGENT_PALETTE = [
+    '#e07a5f', // warm coral
+    '#5bb98c', // sage green
+    '#5ea8e6', // sky blue
+    '#d99b52', // ochre
+    '#b88ce8', // muted violet
+    '#4ec2b8', // teal
+    '#e07094', // rose
+    '#9ec25d', // pistachio
+    '#e08c68', // terracotta
+    '#7aa6e0', // periwinkle
+    '#c988b8', // orchid
+    '#78c49e', // mint
+  ];
+
+  function agentColor(address) {
+    if (!address) return '#a0a3ad';
+    const lower = String(address).trim().toLowerCase();
+    if (lower === 'boss' || lower === 'human') return '#e5a93c';
+    let h = 2166136261;
+    for (let i = 0; i < lower.length; i++) {
+      h ^= lower.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return AGENT_PALETTE[Math.abs(h) % AGENT_PALETTE.length];
+  }
+
+  function avatarStyle(address) {
+    const c = agentColor(address);
+    return `color:${c};background:color-mix(in srgb, ${c} 15%, #1a1c20);border-color:color-mix(in srgb, ${c} 36%, transparent);`;
+  }
+
+  function nameStyle(address) {
+    return `color:${agentColor(address)};`;
+  }
+
+  const ICON_HASH = '<svg class="ic sm" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></svg>';
+  const ICON_LOCK = '<svg class="ic sm" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+  const ICON_USERS = '<svg class="ic sm" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>';
+  const ICON_REPLY = '<svg class="ic sm" viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+
   const state = {
     token: localStorage.getItem('coom_admin_token') || '',
     overview: null,
@@ -640,19 +810,25 @@
     pageMetaByThread: {},
     deliveries: [],
     agentFilter: 'all',
-    threadFilter: 'all',
+    threadKind: 'all',
+    threadExtraFilter: 'all',
+    threadSort: 'updated',
     searchQuery: '',
     showArchived: false,
     offlineExpanded: false,
     selectedThreadId: null,
     selectedAgentAddr: null,
-    inspectorMode: 'agent', // 'agent' | 'subscribers'
+    inspectorMode: 'agent',
     replyToSeq: null,
     sse: null,
     resyncTimer: null,
   };
 
   const $ = (id) => document.getElementById(id);
+
+  // Style Boss card avatar & name dynamically to match
+  $('bossAvatar').setAttribute('style', avatarStyle('Boss'));
+  $('bossName').setAttribute('style', nameStyle('Boss'));
 
   function headers(extra = {}) {
     const h = { 'Content-Type': 'application/json', ...extra };
@@ -663,8 +839,8 @@
   async function api(path, opts = {}) {
     const res = await fetch(path, { ...opts, headers: headers(opts.headers || {}) });
     if (res.status === 401) {
-      openTokenModal();
-      throw new Error('Unauthorized — paste ~/.coommunity/token');
+      openTokenModal('Authentication required — enter your local token.');
+      throw new Error('Unauthorized');
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return res.json();
@@ -687,19 +863,47 @@
     return part.slice(0, 2).toUpperCase();
   }
 
+  function parseMs(iso, explicitMs) {
+    if (typeof explicitMs === 'number' && explicitMs > 0) return explicitMs;
+    if (!iso) return 0;
+    const norm = String(iso).includes('T') ? String(iso) : String(iso).replace(' ', 'T') + 'Z';
+    const t = Date.parse(norm);
+    return isNaN(t) ? 0 : t;
+  }
+
   function fmtTime(iso) {
     if (!iso) return '';
-    const d = new Date(iso);
-    if (isNaN(d.getTime())) return iso;
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const ms = parseMs(iso);
+    if (!ms) return iso;
+    const d = new Date(ms);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    return sameDay
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
   }
 
   function fmtBody(text) {
-    return esc(text).replace(/@([a-zA-Z0-9:_.-]+)/g, '<span class="mention" data-mention="$1">@$1</span>');
+    return esc(text).replace(/@([a-zA-Z0-9:_.-]+)/g, (_, handle) => {
+      const c = agentColor(handle);
+      return `<span class="mention" data-mention="${esc(handle)}" style="color:${c};">@${esc(handle)}</span>`;
+    });
   }
 
-  // --- Initial Data Bootstrap (with graceful fallback to v1.4 /api/snapshot) ---
+  function maskToken(tok) {
+    if (!tok) return 'Not set';
+    if (tok.length <= 8) return '••••••••';
+    return `${tok.slice(0, 4)}••••${tok.slice(-4)}`;
+  }
+
+  function updateTokenButton() {
+    $('btnTokenLabel').textContent = state.token ? 'Token' : 'Set token';
+    $('tokenStatusText').textContent = maskToken(state.token);
+  }
+
+  // --- Bootstrap ---
   async function loadAll(resetThreads = true) {
+    updateTokenButton();
     try {
       const [ov, agRes] = await Promise.all([
         api('/api/admin/overview'),
@@ -710,17 +914,17 @@
       renderHeader();
       renderAgents();
       await loadThreads(resetThreads);
+      loadInitialDeliveries();
       if (state.selectedThreadId) await loadThreadMessages(state.selectedThreadId);
-    } catch (err) {
-      // Graceful fallback if running against v1.4 daemon before backend patch is applied
+    } catch (_) {
       try {
-        const snap = await fetch('/api/snapshot').then((r) => r.json());
+        const snap = await fetch('/api/snapshot', { headers: headers() }).then((r) => r.json());
         state.agents = snap.agents || [];
         state.threads = snap.threads || [];
         state.deliveries = snap.deliveries || [];
         state.overview = {
           paused: snap.status?.paused || false,
-          online_agents: state.agents.filter((a) => a.status === 'online').length,
+          online_agents: state.agents.filter((a) => a.status === 'online' && a.address !== 'Boss').length,
           forum_count: state.threads.filter((t) => t.kind === 'forum').length,
           dm_count: state.threads.filter((t) => t.kind === 'dm').length,
           open_handoffs: 0,
@@ -734,10 +938,30 @@
     }
   }
 
+  async function loadInitialDeliveries() {
+    try {
+      const res = await api('/api/admin/deliveries?limit=50');
+      if (Array.isArray(res.deliveries)) {
+        state.deliveries = res.deliveries;
+        renderActivity();
+        return;
+      }
+    } catch (_) {}
+    try {
+      const snap = await fetch('/api/snapshot', { headers: headers() }).then((r) => r.json());
+      if (Array.isArray(snap.deliveries)) {
+        state.deliveries = snap.deliveries;
+        renderActivity();
+      }
+    } catch (_) {}
+  }
+
   async function loadThreads(reset = true) {
     const params = new URLSearchParams();
-    params.set('limit', '40');
-    if (state.threadFilter !== 'all') params.set('kind', state.threadFilter);
+    params.set('limit', '60');
+    if (state.threadKind !== 'all') params.set('kind', state.threadKind);
+    if (state.threadExtraFilter !== 'all') params.set('filter', state.threadExtraFilter);
+    params.set('sort', state.threadSort);
     if (state.searchQuery.trim()) params.set('q', state.searchQuery.trim());
     if (!reset && state.threadsNextCursor) params.set('before_updated_at', state.threadsNextCursor);
 
@@ -756,7 +980,6 @@
     renderThreads();
   }
 
-  // Latest-page-first pagination (default: latest 50 messages; pass beforeSeq to load older)
   async function loadThreadMessages(threadId, beforeSeq = null) {
     const params = new URLSearchParams({ limit: '50' });
     if (beforeSeq != null) params.set('before_seq', String(beforeSeq));
@@ -785,7 +1008,7 @@
     renderSelectedThread(beforeSeq == null);
   }
 
-  // --- Incremental SSE (NO full loadSnapshot() storm!) ---
+  // --- Incremental SSE ---
   function connectSSE() {
     if (state.sse) { state.sse.close(); state.sse = null; }
     const url = state.token ? `/api/events?token=${encodeURIComponent(state.token)}` : '/api/events';
@@ -793,12 +1016,10 @@
     state.sse = es;
 
     es.onopen = () => {
-      $('sseBadge').className = 'pill live';
-      $('sseBadge').innerHTML = '<span class="dot online"></span> LIVE SSE';
+      $('sseBadge').innerHTML = '<span class="dot online"></span> Live';
     };
     es.onerror = () => {
-      $('sseBadge').className = 'pill warn';
-      $('sseBadge').innerHTML = '<span class="dot"></span> RECONNECTING';
+      $('sseBadge').innerHTML = '<span class="dot warn"></span> Reconnecting';
     };
     es.onmessage = (e) => {
       let ev;
@@ -838,7 +1059,6 @@
     const idx = state.threads.findIndex((x) => x.id === t.id);
     if (idx >= 0) state.threads[idx] = { ...state.threads[idx], ...t };
     else state.threads.unshift(t);
-    state.threads.sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
   }
 
   function scheduleOverviewRefresh() {
@@ -851,6 +1071,35 @@
     }, 600);
   }
 
+  // --- Client-side Filter & Sort (ensures accurate sort even on legacy endpoints) ---
+  function getVisibleThreads() {
+    const q = state.searchQuery.trim().toLowerCase();
+    const list = state.threads.filter((t) => {
+      if (state.threadKind !== 'all' && t.kind !== state.threadKind) return false;
+      const isBossDm = t.kind === 'dm' && ((t.participants || []).some((p) => p.toLowerCase() === 'boss') || (t.id || '').toLowerCase().includes('boss'));
+      if (state.threadExtraFilter === 'boss_dm' && !isBossDm) return false;
+      if (state.threadExtraFilter === 'agent_dm' && !(t.kind === 'dm' && !isBossDm)) return false;
+      if (state.threadExtraFilter === 'open' && !(t.open_action_count > 0)) return false;
+      if (state.threadExtraFilter === 'muted' && !t.muted) return false;
+      if (q) {
+        const hay = `${t.id} ${t.title} ${t.description || ''} ${(t.participants || []).join(' ')} ${t.last_message_preview || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    list.sort((a, b) => {
+      const ta = parseMs(a.updated_at, a.updated_at_ms);
+      const tb = parseMs(b.updated_at, b.updated_at_ms);
+      if (state.threadSort === 'messages') return (b.message_count || 0) - (a.message_count || 0) || tb - ta;
+      if (state.threadSort === 'subscribers') return (b.subscriber_count || 0) - (a.subscriber_count || 0) || tb - ta;
+      if (state.threadSort === 'open_handoffs') return (b.open_action_count || 0) - (a.open_action_count || 0) || tb - ta;
+      if (state.threadSort === 'title') return (a.title || a.id).localeCompare(b.title || b.id);
+      return tb - ta; // default: last updated descending
+    });
+    return list;
+  }
+
   // --- Renderers ---
   function renderHeader() {
     const ov = state.overview || {};
@@ -861,7 +1110,7 @@
 
     const paused = !!ov.paused;
     $('pauseBadge').style.display = paused ? 'inline-flex' : 'none';
-    $('btnPause').textContent = paused ? 'Resume Hub' : 'Pause Hub';
+    $('btnPause').textContent = paused ? 'Resume hub' : 'Pause hub';
 
     const bossUnread = ov.boss_unread ?? 0;
     const badge = $('bossUnreadBadge');
@@ -872,7 +1121,7 @@
   function renderAgents() {
     const q = state.searchQuery.trim().toLowerCase();
     const list = state.agents.filter((a) => {
-      if (a.address === 'Boss') return false; // Pinned separately in Boss card
+      if (a.address === 'Boss') return false;
       if (!state.showArchived && a.archived) return false;
       if (state.agentFilter === 'online' && a.status !== 'online') return false;
       if (state.agentFilter === 'unread' && !(a.unread_count > 0)) return false;
@@ -889,23 +1138,25 @@
 
     const rowHtml = (a) => `
       <div class="agent-row ${a.status !== 'online' ? 'offline' : ''} ${a.archived ? 'archived' : ''} ${state.selectedAgentAddr === a.address ? 'selected' : ''}" data-agent="${esc(a.address)}">
-        <div class="avatar sm rt-${esc(a.runtime)}">${esc(initials(a.address))}</div>
+        <div class="avatar sm" style="${avatarStyle(a.address)}">${esc(initials(a.address))}</div>
         <div class="agent-meta">
           <div class="agent-name">
-            <span class="dot ${a.status === 'online' ? 'online' : ''}" style="margin-right:4px;"></span>${esc(a.address)}
+            <span class="dot ${a.status === 'online' ? 'online' : ''}"></span>
+            <span style="${nameStyle(a.address)}overflow:hidden;text-overflow:ellipsis;">${esc(a.address)}</span>
           </div>
           <div class="agent-sub">
-            <span class="rt-tag ${esc(a.runtime)}">${esc(a.runtime)}</span>
+            <span>${esc(a.runtime)}</span>
+            <span>·</span>
             <span>${esc(shortCwd(a.cwd))}</span>
           </div>
         </div>
-        <span class="unread-badge ${a.unread_count > 0 ? '' : 'zero'}">${a.unread_count || 0}</span>
+        <span class="unread-count ${a.unread_count > 0 ? '' : 'zero'}">${a.unread_count || 0}</span>
       </div>`;
 
     let html = online.map(rowHtml).join('');
     if (offline.length > 0) {
       const showOff = state.offlineExpanded || state.agentFilter === 'unread' || q.length > 0;
-      html += `<div class="section-toggle" id="offlineToggle"><span>Offline / Archived (${offline.length})</span><span>${showOff ? '▼' : '▶'}</span></div>`;
+      html += `<div class="section-toggle num" id="offlineToggle"><span>Offline (${offline.length})</span><span>${showOff ? 'Hide' : 'Show'}</span></div>`;
       if (showOff) html += offline.map(rowHtml).join('');
     }
     if (!html) html = '<div class="empty-state" style="font-size:12px;">No matching agents</div>';
@@ -919,31 +1170,39 @@
   }
 
   function renderThreads() {
-    $('threadTotalCount').textContent = state.threadsTotal;
+    const visible = getVisibleThreads();
+    $('threadTotalCount').textContent = visible.length;
     $('loadMoreThreadsWrap').style.display = state.threadsHasMore ? 'block' : 'none';
 
-    if (!state.threads.length) {
-      $('threadsList').innerHTML = '<div class="empty-state" style="font-size:12px;">No conversations match your filter</div>';
+    if (!visible.length) {
+      $('threadsList').innerHTML = '<div class="empty-state" style="font-size:12px;">No matching conversations</div>';
       return;
     }
 
-    $('threadsList').innerHTML = state.threads.map((t) => {
+    $('threadsList').innerHTML = visible.map((t) => {
       const isDm = t.kind === 'dm';
       const isBossDm = isDm && ((t.participants || []).some((p) => p.toLowerCase() === 'boss') || (t.id || '').toLowerCase().includes('boss'));
-      const prefix = isDm ? (isBossDm ? '⭐ ' : '🔒 ') : '# ';
+      const icon = isDm ? ICON_LOCK : ICON_HASH;
+      const senderSpan = t.last_message_sender
+        ? `<span style="${nameStyle(t.last_message_sender)}font-weight:500;">${esc(t.last_message_sender)}:</span> `
+        : '';
+
       return `
-        <div class="thread-card ${state.selectedThreadId === t.id ? 'selected' : ''} ${isBossDm ? 'boss-dm' : ''}" data-thread="${esc(t.id)}">
+        <div class="thread-card ${state.selectedThreadId === t.id ? 'selected' : ''}" data-thread="${esc(t.id)}">
           <div class="thread-top">
-            <div class="thread-title">${prefix}${esc(t.title || t.id)}</div>
-            <span class="chip">${t.message_count ?? 0}</span>
+            <div class="thread-title" style="color:var(--text);">
+              <span style="color:var(--text-3);display:inline-flex;">${icon}</span>
+              <span style="overflow:hidden;text-overflow:ellipsis;">${esc(t.title || t.id)}</span>
+            </div>
+            <span class="thread-time num">${fmtTime(t.updated_at)}</span>
           </div>
-          ${t.last_message_preview ? `<div class="thread-preview"><b>${esc(t.last_message_sender || '')}:</b> ${esc(t.last_message_preview)}</div>` : ''}
-          <div class="thread-chips">
-            <span class="chip ${isDm ? (isBossDm ? 'boss' : 'dm') : ''}">${isDm ? (isBossDm ? 'Boss DM' : 'Agent DM') : 'Forum'}</span>
-            <span class="chip sub">👥 ${t.subscriber_count ?? 0}</span>
-            ${t.open_action_count > 0 ? `<span class="chip open">${t.open_action_count} open</span>` : ''}
-            ${t.muted ? `<span class="chip">muted</span>` : ''}
-            <span style="margin-left:auto;">${fmtTime(t.updated_at)}</span>
+          ${t.last_message_preview ? `<div class="thread-preview">${senderSpan}${esc(t.last_message_preview)}</div>` : ''}
+          <div class="thread-meta num">
+            ${isBossDm ? '<span class="tag boss">Boss DM</span>' : `<span>${isDm ? 'DM' : 'Forum'}</span>`}
+            <span class="meta-item">${ICON_USERS} ${t.subscriber_count ?? 0}</span>
+            <span>${t.message_count ?? 0} msgs</span>
+            ${t.open_action_count > 0 ? `<span class="tag open">${t.open_action_count} open</span>` : ''}
+            ${t.muted ? '<span>Muted</span>' : ''}
           </div>
         </div>`;
     }).join('');
@@ -959,15 +1218,14 @@
 
     $('convHeader').style.display = 'flex';
     $('composer').style.display = 'flex';
-    $('convTitle').textContent = (t.kind === 'dm' ? '🔒 ' : '# ') + (t.title || t.id);
+    $('convTitle').innerHTML = `<span style="color:var(--text-3);display:inline-flex;">${t.kind === 'dm' ? ICON_LOCK : ICON_HASH}</span> ${esc(t.title || t.id)}`;
     $('convId').textContent = t.id;
-    $('convHops').textContent = `hops ${t.hop_count}/${t.max_hops}`;
-    $('convHops').className = t.hop_count >= t.max_hops ? 'pill danger' : 'pill';
+    $('convHops').textContent = `Hops ${t.hop_count}/${t.max_hops}`;
+    $('convHops').className = t.hop_count >= t.max_hops ? 'tag open num' : 'tag num';
     $('convDesc').textContent = t.description || '';
-    $('btnSubscribers').textContent = `👥 Subscribers (${t.subscriber_count ?? 0})`;
+    $('btnSubscribersLabel').textContent = `Subscribers (${t.subscriber_count ?? 0})`;
     $('btnMuteThread').textContent = t.muted ? 'Unmute' : 'Mute';
 
-    // Pinned Brief Blackboard
     if (t.brief && t.brief.trim()) {
       $('briefCard').style.display = 'block';
       $('briefBody').textContent = t.brief;
@@ -981,11 +1239,11 @@
     let html = '';
 
     if (meta.has_more_before) {
-      html += `<div class="load-older-bar"><button class="btn sm" id="btnLoadOlder">↑ Load older messages (showing latest ${msgs.length} of ${meta.total_count || '?'})</button></div>`;
+      html += `<div class="load-older-bar"><button class="btn sm num" id="btnLoadOlder">Load older messages (showing latest ${msgs.length} of ${meta.total_count || '?'})</button></div>`;
     }
 
     if (!msgs.length) {
-      html += '<div class="empty-state">No messages yet. Post below as Boss to kick off the thread.</div>';
+      html += '<div class="empty-state">No messages yet. Post below as Boss to start the thread.</div>';
     } else {
       html += msgs.map((m) => {
         const type = m.msg_type || 'chat';
@@ -994,18 +1252,17 @@
         return `
           <div class="msg-card type-${esc(type)} ${isBoss ? 'from-boss' : ''}">
             <div class="msg-head">
-              <div class="avatar sm ${isBoss ? 'boss' : ''}">${esc(initials(m.sender))}</div>
-              <span class="msg-sender" data-agent="${esc(m.sender)}">${esc(m.sender)}</span>
-              ${isBoss ? '<span class="rt-tag human">Boss</span>' : ''}
-              <span class="msg-seq">#${m.seq}</span>
-              ${type !== 'chat' ? `<span class="type-pill ${esc(type)}">${esc(type)}</span>` : ''}
-              ${m.status ? `<button class="status-btn ${esc(m.status)}" data-seq="${m.seq}" data-status="${esc(m.status)}" title="Click to cycle status (open → accepted → resolved)">${esc(m.status)}</button>` : ''}
-              <button class="btn sm ghost" data-reply-seq="${m.seq}" style="padding:1px 6px;">↩ Reply</button>
-              <span class="msg-time">${fmtTime(m.created_at)}</span>
+              <div class="avatar sm" style="${avatarStyle(m.sender)}">${esc(initials(m.sender))}</div>
+              <span class="msg-sender" style="${nameStyle(m.sender)}" data-agent="${esc(m.sender)}">${esc(m.sender)}</span>
+              <span class="msg-seq mono">#${m.seq}</span>
+              ${type !== 'chat' ? `<span class="type-label ${esc(type)}">${esc(type)}</span>` : ''}
+              ${m.status ? `<button class="status-btn ${esc(m.status)}" data-seq="${m.seq}" data-status="${esc(m.status)}" title="Cycle status">${esc(m.status)}</button>` : ''}
+              <button class="btn sm ghost" data-reply-seq="${m.seq}" style="height:24px;padding:0 6px;">${ICON_REPLY} Reply</button>
+              <span class="msg-time num">${fmtTime(m.created_at)}</span>
             </div>
-            ${m.reply_to_seq ? `<div class="reply-strip">↳ Replying to message #${m.reply_to_seq}</div>` : ''}
+            ${m.reply_to_seq ? `<div class="reply-strip mono">Replying to #${m.reply_to_seq}</div>` : ''}
             <div class="msg-body">${fmtBody(m.body)}</div>
-            ${refs.length ? `<div class="refs-row">${refs.map((r) => `<span class="ref-chip">📎 ${esc(r.path)}${r.line ? ':' + r.line : ''}${r.symbol ? ' · ' + esc(r.symbol) : ''}${r.commit ? ' @' + esc(r.commit.slice(0, 7)) : ''}</span>`).join('')}</div>` : ''}
+            ${refs.length ? `<div class="refs-row">${refs.map((r) => `<span class="ref-chip">${esc(r.path)}${r.line ? ':' + r.line : ''}${r.symbol ? ' · ' + esc(r.symbol) : ''}${r.commit ? ' @' + esc(r.commit.slice(0, 7)) : ''}</span>`).join('')}</div>` : ''}
           </div>`;
       }).join('');
     }
@@ -1034,13 +1291,13 @@
 
   function renderActivity() {
     $('activityCount').textContent = state.deliveries.length;
-    $('activityBody').innerHTML = state.deliveries.slice(0, 40).map((d) => `
+    $('activityBody').innerHTML = state.deliveries.slice(0, 50).map((d) => `
       <div class="act-row">
-        <span style="color:var(--text-muted);">${fmtTime(d.created_at)}</span>
-        <span class="chip">${esc(d.status || 'queued')}</span>
-        <span style="color:#93c5fd;">→ ${esc(d.target_agent)}</span>
-        <span style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(d.thread_id || '')}</span>
-      </div>`).join('') || '<div style="font-size:12px;color:var(--text-muted);">No recent events</div>';
+        <span class="mono" style="color:var(--text-3);">${fmtTime(d.created_at)}</span>
+        <span class="tag">${esc(d.status || 'queued')}</span>
+        <span style="${nameStyle(d.target_agent)}font-weight:500;">${esc(d.target_agent)}</span>
+        <span class="mono" style="color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(d.thread_id || '')}</span>
+      </div>`).join('') || '<div style="font-size:12px;color:var(--text-3);">No recent delivery events</div>';
   }
 
   // --- Inspector: Agent Profile & Live Inbox ---
@@ -1051,8 +1308,8 @@
     $('bossCard').classList.toggle('active', addr.toLowerCase() === 'boss');
     renderAgents();
 
-    $('inspTitle').textContent = addr.toLowerCase() === 'boss' ? 'Boss Profile & Inbox' : 'Agent Profile & Inbox';
-    $('inspBody').innerHTML = '<div class="empty-state">Loading live inbox...</div>';
+    $('inspTitle').textContent = addr.toLowerCase() === 'boss' ? 'Boss profile & inbox' : 'Agent profile & inbox';
+    $('inspBody').innerHTML = '<div class="empty-state">Loading inbox...</div>';
 
     try {
       const data = await api(`/api/admin/agents/${encodeURIComponent(addr)}/inbox`);
@@ -1061,42 +1318,46 @@
       const isBoss = a.address.toLowerCase() === 'boss';
 
       $('inspBody').innerHTML = `
-        <div class="profile-banner">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <div class="avatar ${isBoss ? 'boss' : 'rt-' + esc(a.runtime)}">${esc(initials(a.address))}</div>
+        <div class="profile-card">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="avatar lg" style="${avatarStyle(a.address)}">${esc(initials(a.address))}</div>
             <div style="min-width:0;flex:1;">
-              <div style="font-weight:700;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;">${esc(a.address)}</div>
-              <div style="font-size:11.5px;color:var(--text-dim);display:flex;gap:6px;align-items:center;">
+              <div style="font-weight:600;font-size:14.5px;overflow:hidden;text-overflow:ellipsis;${nameStyle(a.address)}">${esc(a.address)}</div>
+              <div style="font-size:12px;color:var(--text-2);display:flex;gap:6px;align-items:center;">
                 <span class="dot ${a.status === 'online' ? 'online' : ''}"></span>
-                <span>${esc(a.status)}</span> · <span class="rt-tag ${esc(a.runtime)}">${esc(a.runtime)}</span>
+                <span>${esc(a.status)}</span> · <span>${esc(a.runtime)}</span>
               </div>
             </div>
           </div>
-          ${a.bio ? `<div style="font-size:12px;color:var(--text);">${esc(a.bio)}</div>` : ''}
+          ${a.bio ? `<div style="font-size:12.5px;color:var(--text-2);">${esc(a.bio)}</div>` : ''}
           ${(a.capabilities || []).length ? `<div class="cap-list">${a.capabilities.map((c) => `<span class="cap-tag">${esc(c)}</span>`).join('')}</div>` : ''}
-          <div style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);word-break:break-all;">${esc(a.cwd)}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;">
-            ${!isBoss ? `<button class="btn sm primary" id="btnInspDm">✉️ DM as Boss</button>` : ''}
-            <button class="btn sm" id="btnInspAck">✓ Ack All (${data.total_unread})</button>
+          <div class="mono" style="font-size:11.5px;color:var(--text-3);word-break:break-all;">${esc(a.cwd)}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            ${!isBoss ? '<button class="btn sm primary" id="btnInspDm">DM as Boss</button>' : '<button class="btn sm" id="btnInspToken">Token settings</button>'}
+            <button class="btn sm num" id="btnInspAck">Ack all (${data.total_unread})</button>
             ${!isBoss ? `<button class="btn sm" id="btnInspArchive">${a.archived ? 'Unarchive' : 'Archive'}</button>` : ''}
           </div>
         </div>
 
         <div>
-          <div class="rail-title" style="margin-bottom:8px;">Live Unread Inbox (${data.total_unread})</div>
-          ${items.length ? items.map((it) => `
-            <div class="inbox-item" data-jump-thread="${esc(it.thread_id)}">
-              <div style="display:flex;align-items:center;gap:6px;">
-                <span class="chip ${it.thread_kind === 'dm' ? 'dm' : ''}">${it.thread_kind === 'dm' ? 'DM' : 'Forum'}</span>
-                <b style="font-size:12.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.thread_title || it.thread_id)}</b>
-                <span class="unread-badge">${it.unread_count}</span>
-              </div>
-              <div style="font-size:11.5px;color:var(--text-dim);"><b>${esc(it.latest_sender)}:</b> ${esc(it.latest_body)}</div>
-            </div>`).join('') : '<div style="font-size:12px;color:var(--text-muted);padding:8px 0;">Inbox zero — no unread mentions or DMs.</div>'}
+          <div class="rail-title num" style="margin-bottom:8px;">Unread inbox (${data.total_unread})</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            ${items.length ? items.map((it) => `
+              <div class="inbox-item" data-jump-thread="${esc(it.thread_id)}">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span class="tag">${it.thread_kind === 'dm' ? 'DM' : 'Forum'}</span>
+                  <span style="font-weight:500;font-size:12.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(it.thread_title || it.thread_id)}</span>
+                  <span class="unread-count">${it.unread_count}</span>
+                </div>
+                <div style="font-size:12px;color:var(--text-2);"><span style="${nameStyle(it.latest_sender)}font-weight:500;">${esc(it.latest_sender)}:</span> ${esc(it.latest_body)}</div>
+              </div>`).join('') : '<div style="font-size:12.5px;color:var(--text-3);">No unread mentions or DMs</div>'}
+          </div>
         </div>`;
 
       const dmBtn = $('btnInspDm');
       if (dmBtn) dmBtn.onclick = () => openDmModal(a.address);
+      const tokBtn = $('btnInspToken');
+      if (tokBtn) tokBtn.onclick = () => openTokenModal();
       $('btnInspAck').onclick = async () => {
         await api(`/api/agents/${encodeURIComponent(a.address)}/inbox/ack-all`, { method: 'POST', body: '{}' });
         await loadAll(false);
@@ -1118,11 +1379,11 @@
     }
   }
 
-  // --- Inspector: Forum Subscribers Roster ---
+  // --- Inspector: Forum Subscribers ---
   async function openSubscribersInspector(threadId) {
     state.inspectorMode = 'subscribers';
     $('workspace').classList.remove('inspector-closed');
-    $('inspTitle').textContent = 'Forum Subscribers';
+    $('inspTitle').textContent = 'Subscribers';
     $('inspBody').innerHTML = '<div class="empty-state">Loading subscribers...</div>';
 
     try {
@@ -1131,23 +1392,27 @@
       $('inspTitle').textContent = `Subscribers (${data.count ?? subs.length})`;
 
       $('inspBody').innerHTML = `
-        <div style="font-size:12px;color:var(--text-dim);">
-          Explicit subscribers and agents auto-notified via <code>@mention</code>. Click any member to inspect their inbox.
+        <div style="font-size:12px;color:var(--text-2);">
+          Explicit subscribers and agents notified via @mention. Click any row to inspect their inbox.
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           ${subs.map((s) => `
             <div class="sub-row">
-              <span class="dot ${s.agent_status === 'online' ? 'online' : ''}"></span>
+              <div class="avatar sm" style="${avatarStyle(s.agent_address)}">${esc(initials(s.agent_address))}</div>
               <div style="min-width:0;flex:1;cursor:pointer;" data-open-agent="${esc(s.agent_address)}">
-                <div style="font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;">${esc(s.agent_address)}</div>
-                <div style="font-size:10.5px;color:var(--text-muted);display:flex;gap:5px;align-items:center;">
-                  <span class="chip">${esc(s.mode)}</span>
-                  ${s.auto_subscribed ? '<span class="chip sub">via @mention</span>' : '<span class="chip">subscribed</span>'}
-                  ${s.unread_lag > 0 ? `<span class="chip open">-${s.unread_lag} unread</span>` : '<span>caught up</span>'}
+                <div style="font-weight:500;font-size:12.5px;display:flex;align-items:center;gap:6px;">
+                  <span class="dot ${s.agent_status === 'online' ? 'online' : ''}"></span>
+                  <span style="${nameStyle(s.agent_address)}overflow:hidden;text-overflow:ellipsis;">${esc(s.agent_address)}</span>
+                </div>
+                <div class="num" style="font-size:11px;color:var(--text-3);display:flex;gap:6px;margin-top:2px;">
+                  <span>${esc(s.mode)}</span>
+                  <span>·</span>
+                  <span>${s.auto_subscribed ? 'via @mention' : 'subscribed'}</span>
+                  ${s.unread_lag > 0 ? `<span>· <b style="color:var(--err);">${s.unread_lag} unread</b></span>` : ''}
                 </div>
               </div>
-              <button class="btn sm ghost" data-unsub="${esc(s.agent_address)}" title="Remove subscriber">✕</button>
-            </div>`).join('') || '<div style="font-size:12px;color:var(--text-muted);">No subscribers yet.</div>'}
+              <button class="btn sm ghost" data-unsub="${esc(s.agent_address)}" title="Remove subscriber"><svg class="ic sm" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
+            </div>`).join('') || '<div style="font-size:12px;color:var(--text-3);">No subscribers yet</div>'}
         </div>`;
 
       $('inspBody').querySelectorAll('[data-open-agent]').forEach((el) => {
@@ -1178,7 +1443,7 @@
   function setReplyTo(seq) {
     state.replyToSeq = seq;
     $('replyIndicator').style.display = 'inline-flex';
-    $('replyIndicator').innerHTML = `Replying to #${seq} <span style="cursor:pointer;margin-left:4px;" id="clearReply">✕</span>`;
+    $('replyIndicator').innerHTML = `Replying to #${seq} <span style="cursor:pointer;margin-left:6px;" id="clearReply"><svg class="ic sm" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span>`;
     $('clearReply').onclick = () => { state.replyToSeq = null; $('replyIndicator').style.display = 'none'; };
     $('composeBody').focus();
   }
@@ -1219,11 +1484,89 @@
     await loadThreadMessages(state.selectedThreadId, null);
   }
 
-  // --- Modals & Bindings ---
-  function openTokenModal() {
+  // --- Token Modal (View / Switch / Test / Clear / Rotate anytime) ---
+  function openTokenModal(feedback = '') {
+    $('tokenStatusText').textContent = maskToken(state.token);
     $('tokenInput').value = state.token;
+    $('rotateTokenInput').value = '';
+    $('tokenFeedback').textContent = feedback;
+    $('tokenFeedback').className = 'feedback-msg';
     $('tokenModal').classList.add('open');
   }
+
+  $('btnToken').onclick = () => openTokenModal();
+  $('btnCloseToken').onclick = () => $('tokenModal').classList.remove('open');
+
+  $('btnSaveToken').onclick = () => {
+    state.token = $('tokenInput').value.trim();
+    localStorage.setItem('coom_admin_token', state.token);
+    updateTokenButton();
+    $('tokenModal').classList.remove('open');
+    connectSSE();
+    loadAll(true);
+  };
+
+  $('btnTestToken').onclick = async () => {
+    const candidate = $('tokenInput').value.trim();
+    const fb = $('tokenFeedback');
+    fb.textContent = 'Testing...';
+    fb.className = 'feedback-msg';
+    try {
+      const r = await fetch('/api/admin/overview', {
+        headers: { 'Authorization': `Bearer ${candidate}` },
+      });
+      if (r.ok) {
+        fb.textContent = 'Token accepted by daemon';
+        fb.className = 'feedback-msg ok';
+      } else {
+        fb.textContent = `Rejected (HTTP ${r.status})`;
+        fb.className = 'feedback-msg err';
+      }
+    } catch (e) {
+      fb.textContent = `Connection failed: ${e.message}`;
+      fb.className = 'feedback-msg err';
+    }
+  };
+
+  $('btnClearToken').onclick = () => {
+    state.token = '';
+    localStorage.removeItem('coom_admin_token');
+    $('tokenInput').value = '';
+    updateTokenButton();
+    $('tokenFeedback').textContent = 'Browser token cleared';
+    $('tokenFeedback').className = 'feedback-msg';
+  };
+
+  $('btnRotateToken').onclick = async () => {
+    const custom = $('rotateTokenInput').value.trim();
+    const fb = $('tokenFeedback');
+    if (custom && custom.length < 16) {
+      fb.textContent = 'Custom token must be at least 16 characters';
+      fb.className = 'feedback-msg err';
+      return;
+    }
+    try {
+      const res = await api('/api/admin/token', {
+        method: 'POST',
+        body: JSON.stringify({ new_token: custom || null }),
+      });
+      state.token = res.token;
+      localStorage.setItem('coom_admin_token', state.token);
+      $('tokenInput').value = state.token;
+      $('rotateTokenInput').value = '';
+      updateTokenButton();
+      fb.textContent = res.persisted_to_disk
+        ? 'Daemon token rotated and saved to ~/.coommunity/token'
+        : 'Daemon token rotated in memory';
+      fb.className = 'feedback-msg ok';
+      connectSSE();
+      loadAll(false);
+    } catch (e) {
+      fb.textContent = `Rotate failed (${e.message})`;
+      fb.className = 'feedback-msg err';
+    }
+  };
+
   function openDmModal(preselect = null) {
     const sel = $('dmRecipient');
     const opts = state.agents.filter((a) => a.address !== 'Boss' && !a.archived);
@@ -1232,16 +1575,6 @@
     $('dmBody').value = '';
     $('dmModal').classList.add('open');
   }
-
-  $('btnToken').onclick = openTokenModal;
-  $('btnCloseToken').onclick = () => $('tokenModal').classList.remove('open');
-  $('btnSaveToken').onclick = () => {
-    state.token = $('tokenInput').value.trim();
-    localStorage.setItem('coom_admin_token', state.token);
-    $('tokenModal').classList.remove('open');
-    connectSSE();
-    loadAll(true);
-  };
 
   $('bossCard').onclick = () => openAgentInspector('Boss');
   $('btnCloseInspector').onclick = () => $('workspace').classList.add('inspector-closed');
@@ -1329,7 +1662,7 @@
   $('activityToggle').onclick = () => {
     const d = $('activityDrawer');
     d.classList.toggle('open');
-    $('activityChevron').textContent = d.classList.contains('open') ? '▼ Collapse' : '▲ Expand';
+    $('activityChevron').textContent = d.classList.contains('open') ? 'Collapse' : 'Expand';
   };
 
   document.querySelectorAll('[data-agent-filter]').forEach((btn) => {
@@ -1344,10 +1677,12 @@
     btn.onclick = () => {
       document.querySelectorAll('[data-thread-filter]').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
-      state.threadFilter = btn.dataset.threadFilter;
+      state.threadKind = btn.dataset.threadFilter;
       loadThreads(true);
     };
   });
+  $('threadExtraFilter').onchange = (e) => { state.threadExtraFilter = e.target.value; loadThreads(true); };
+  $('threadSort').onchange = (e) => { state.threadSort = e.target.value; loadThreads(true); };
 
   let searchTimer = null;
   $('globalSearch').addEventListener('input', (e) => {
